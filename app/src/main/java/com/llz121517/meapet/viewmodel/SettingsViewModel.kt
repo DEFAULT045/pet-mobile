@@ -37,7 +37,9 @@ data class SettingsUiState(
     val systemPrompt: String = SettingsKeys.Defaults.SYSTEM_PROMPT,
     val enableMemory: Boolean = SettingsKeys.Defaults.ENABLE_MEMORY,
     val enableAutoSummary: Boolean = SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY,
-    val themeMode: String = SettingsKeys.Defaults.THEME_MODE
+    val themeMode: String = SettingsKeys.Defaults.THEME_MODE,
+    val enableDynamicColor: Boolean = SettingsKeys.Defaults.ENABLE_DYNAMIC_COLOR,
+    val colorPreset: String = SettingsKeys.Defaults.COLOR_PRESET
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -100,6 +102,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 _state.update { it.copy(themeMode = mode) }
             }
         }
+        viewModelScope.launch {
+            settingsManager.enableDynamicColorFlow.collect { enabled ->
+                _state.update { it.copy(enableDynamicColor = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsManager.colorPresetFlow.collect { preset ->
+                _state.update { it.copy(colorPreset = preset) }
+            }
+        }
     }
 
     // ── 更新方法 ──────────────────────────────────────
@@ -144,6 +156,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun updateThemeMode(mode: String) {
         viewModelScope.launch { settingsManager.setThemeMode(mode) }
+    }
+
+    fun updateEnableDynamicColor(enabled: Boolean) {
+        viewModelScope.launch { settingsManager.setEnableDynamicColor(enabled) }
+    }
+
+    fun updateColorPreset(preset: String) {
+        viewModelScope.launch { settingsManager.setColorPreset(preset) }
     }
 
     // ── 工具 ──────────────────────────────────────────

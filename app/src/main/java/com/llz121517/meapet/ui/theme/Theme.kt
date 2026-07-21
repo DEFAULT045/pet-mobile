@@ -1,42 +1,25 @@
 package com.llz121517.meapet.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
-
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-)
 
 /**
  * MeaPet 主题。
  *
- * @param themeMode 主题模式：
- *   - `"dark"`  → 强制深色
- *   - `"light"` → 强制浅色
- *   - `"system"` / `null` → 跟随系统设置
+ * @param themeMode "dark" / "light" / "system"(null)
  * @param dynamicColor 是否使用 Material You 动态取色（Android 12+）
- * @param content 内容
+ * @param colorPreset 颜色预设 ID（dynamicColor=true 时无效）
  */
 @Composable
 fun MeaPetTheme(
     themeMode: String? = null,
     dynamicColor: Boolean = true,
+    colorPreset: String = "default",
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
@@ -50,8 +33,10 @@ fun MeaPetTheme(
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        else -> {
+            val preset = findPreset(colorPreset)
+            if (darkTheme) preset.dark else preset.light
+        }
     }
 
     MaterialTheme(

@@ -1,19 +1,33 @@
 package com.llz121517.meapet.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -21,18 +35,20 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,20 +56,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.llz121517.meapet.ui.theme.THEME_PRESETS
+import com.llz121517.meapet.ui.theme.findPreset
 import com.llz121517.meapet.viewmodel.SettingsViewModel
 
 /**
  * 设置页面。
- *
- * 包含 API 配置、模型参数、记忆开关、主题选择等。
- * 所有修改实时持久化到 DataStore。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
@@ -61,6 +78,17 @@ fun SettingsScreen(
 ) {
     val state by settingsViewModel.state.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
+
+    // ── 本地状态（保持光标位置） ──
+    var localApiKey by remember { mutableStateOf(state.apiKey) }
+    var localApiUrl by remember { mutableStateOf(state.apiUrl) }
+    var localModel by remember { mutableStateOf(state.model) }
+    var localSystemPrompt by remember { mutableStateOf(state.systemPrompt) }
+
+    LaunchedEffect(state.apiKey) { if (localApiKey != state.apiKey) localApiKey = state.apiKey }
+    LaunchedEffect(state.apiUrl) { if (localApiUrl != state.apiUrl) localApiUrl = state.apiUrl }
+    LaunchedEffect(state.model) { if (localModel != state.model) localModel = state.model }
+    LaunchedEffect(state.systemPrompt) { if (localSystemPrompt != state.systemPrompt) localSystemPrompt = state.systemPrompt }
 
     Scaffold(
         topBar = {
@@ -87,13 +115,17 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
         ) {
-            // ── API 配置 ────────────────────────────
+            // ══════════════════════════════════════════
+            //  API 配置
+            // ══════════════════════════════════════════
             SectionTitle("API 配置")
 
-            // API Key
             OutlinedTextField(
-                value = if (apiKeyVisible) state.apiKey else state.apiKeyMasked,
-                onValueChange = { settingsViewModel.updateApiKey(it) },
+                value = localApiKey,
+                onValueChange = {
+                    localApiKey = it
+                    settingsViewModel.updateApiKey(it)
+                },
                 label = { Text("API Key") },
                 placeholder = { Text("sk-...") },
                 modifier = Modifier.fillMaxWidth(),
@@ -103,20 +135,28 @@ fun SettingsScreen(
                 else
                     PasswordVisualTransformation(),
                 trailingIcon = {
-                    TextButtonSmall(
-                        text = if (apiKeyVisible) "隐藏" else "显示",
-                        onClick = { apiKeyVisible = !apiKeyVisible }
-                    )
+                    TextButton(
+                        onClick = { apiKeyVisible = !apiKeyVisible },
+                        modifier = Modifier.width(56.dp)
+                    ) {
+                        Text(
+                            text = if (apiKeyVisible) "隐藏" else "显示",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
             )
 
             Spacer(Modifier.height(8.dp))
 
-            // API URL
             OutlinedTextField(
-                value = state.apiUrl,
-                onValueChange = { settingsViewModel.updateApiUrl(it) },
+                value = localApiUrl,
+                onValueChange = {
+                    localApiUrl = it
+                    settingsViewModel.updateApiUrl(it)
+                },
                 label = { Text("API 地址") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -125,13 +165,17 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ── 模型参数 ────────────────────────────
+            // ══════════════════════════════════════════
+            //  模型参数
+            // ══════════════════════════════════════════
             SectionTitle("模型参数")
 
-            // 模型名
             OutlinedTextField(
-                value = state.model,
-                onValueChange = { settingsViewModel.updateModel(it) },
+                value = localModel,
+                onValueChange = {
+                    localModel = it
+                    settingsViewModel.updateModel(it)
+                },
                 label = { Text("模型") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -140,7 +184,6 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // Temperature
             Text(
                 text = "Temperature: ${"%.2f".format(state.temperature)}",
                 style = MaterialTheme.typography.bodyMedium,
@@ -156,7 +199,6 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // Max Tokens
             Text(
                 text = "最大 Token: ${state.maxTokens}",
                 style = MaterialTheme.typography.bodyMedium,
@@ -172,11 +214,16 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ── System Prompt ───────────────────────
+            // ══════════════════════════════════════════
+            //  System Prompt
+            // ══════════════════════════════════════════
             SectionTitle("System Prompt")
             OutlinedTextField(
-                value = state.systemPrompt,
-                onValueChange = { settingsViewModel.updateSystemPrompt(it) },
+                value = localSystemPrompt,
+                onValueChange = {
+                    localSystemPrompt = it
+                    settingsViewModel.updateSystemPrompt(it)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp),
@@ -185,7 +232,9 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ── 记忆系统 ────────────────────────────
+            // ══════════════════════════════════════════
+            //  记忆系统
+            // ══════════════════════════════════════════
             SectionTitle("记忆系统")
 
             SettingsSwitchRow(
@@ -203,16 +252,46 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ── 主题 ────────────────────────────────
+            // ══════════════════════════════════════════
+            //  主题
+            // ══════════════════════════════════════════
             SectionTitle("主题")
-            ThemeSelector(
+
+            // ── 主题模式 ──
+            ThemeModeSelector(
                 current = state.themeMode,
                 onSelect = { settingsViewModel.updateThemeMode(it) }
             )
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
-            // ── 关于 ────────────────────────────────
+            // ── 动态颜色开关 ──
+            SettingsSwitchRow(
+                label = "使用系统动态颜色",
+                description = "关闭后可选择预设主题色",
+                checked = state.enableDynamicColor,
+                onCheckedChange = { settingsViewModel.updateEnableDynamicColor(it) }
+            )
+
+            // ── 颜色预设选择区（关闭动态颜色时展开） ──
+            AnimatedVisibility(
+                visible = !state.enableDynamicColor,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                ColorPresetSelector(
+                    currentPreset = state.colorPreset,
+                    onSelect = { settingsViewModel.updateColorPreset(it) }
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ══════════════════════════════════════════
+            //  关于
+            // ══════════════════════════════════════════
+            SectionTitle("关于")
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -220,10 +299,23 @@ fun SettingsScreen(
                 )
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("关于 MeaPet", style = MaterialTheme.typography.titleSmall)
+                    Text("MeaPet", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "版本 1.0.0\n虚拟宠物聊天应用 · Live2D + AI",
+                        "版本 1.0.0",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "基于 Live2D + AI 的虚拟宠物聊天应用。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "技术栈：Live2D Cubism · Jetpack Compose · Ktor · Coroutines",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -235,13 +327,16 @@ fun SettingsScreen(
     }
 }
 
-// ── 辅助组件 ──────────────────────────────────────
+// ═══════════════════════════════════════════════════
+//  子组件
+// ═══════════════════════════════════════════════════
 
 @Composable
 private fun SectionTitle(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(vertical = 8.dp)
     )
@@ -272,22 +367,9 @@ private fun SettingsSwitchRow(
     }
 }
 
-@Composable
-private fun TextButtonSmall(
-    text: String,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier.width(72.dp)
-    ) {
-        Text(text, style = MaterialTheme.typography.labelSmall)
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ThemeSelector(
+private fun ThemeModeSelector(
     current: String,
     onSelect: (String) -> Unit
 ) {
@@ -320,6 +402,70 @@ private fun ThemeSelector(
                         expanded = false
                     }
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 颜色预设选择区——色块网格。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ColorPresetSelector(
+    currentPreset: String,
+    onSelect: (String) -> Unit
+) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Text(
+            "主题色预设",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            THEME_PRESETS.forEach { preset ->
+                val isSelected = preset.id == currentPreset
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable { onSelect(preset.id) }
+                        .width(56.dp)
+                ) {
+                    // 色块圆
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(preset.colorLight)
+                            .then(
+                                if (isSelected) Modifier.border(
+                                    3.dp,
+                                    MaterialTheme.colorScheme.primary,
+                                    CircleShape
+                                ) else Modifier.border(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                    CircleShape
+                                )
+                            )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = preset.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }

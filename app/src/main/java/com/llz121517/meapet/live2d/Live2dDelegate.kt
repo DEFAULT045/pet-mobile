@@ -25,8 +25,10 @@ class Live2dDelegate private constructor() {
         }
     }
 
-    lateinit var activity: Activity
-        private set
+    @Volatile
+    private var _activity: Activity? = null
+    val activity: Activity get() = _activity!!
+    // 暴露给其他 Live2D 模块（非空，但在 GL 线程安全地用 try-catch 保护）
 
     val textureManager = Live2dTextureManager()
     val view = Live2dView()
@@ -36,10 +38,18 @@ class Live2dDelegate private constructor() {
     var windowHeight = 0
         private set
 
+    @Volatile
     private var isActive = false
     private var isCaptured = false
     private var mouseX = 0.0f
     private var mouseY = 0.0f
+
+    /** 背景色 RGBA（0~1），跟随主题变化。默认浅色。 */
+    @Volatile
+    var bgR = 0.98f
+    var bgG = 0.98f
+    var bgB = 0.98f
+    var bgA = 1.0f
 
     private val cubismOption = CubismFramework.Option()
 
@@ -54,7 +64,7 @@ class Live2dDelegate private constructor() {
     }
 
     fun onStart(activity: Activity) {
-        this.activity = activity
+        this._activity = activity
         isActive = true
     }
 
@@ -125,14 +135,18 @@ class Live2dDelegate private constructor() {
 
         Live2dPal.updateTime()
 
-        GLES20.glClearColor(1.0f, 1.0f, 1.0f, 1.0f)
+        GLES20.glClearColor(bgR, bgG, bgB, bgA)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         GLES20.glClearDepthf(1.0f)
 
-        view.render()
+        try {
+            view.render()
+        } catch (e: Exception) {
+            Log.e(TAG, "Render error: ${e.message}")
+        }
 
         if (!isActive) {
-            activity.finishAndRemoveTask()
+            _activity?.finishAndRemoveTask()
         }
     }
 

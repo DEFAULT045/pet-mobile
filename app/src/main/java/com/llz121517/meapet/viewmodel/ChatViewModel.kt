@@ -81,9 +81,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             result.fold(
                 onSuccess = { (userMsg, assistantMsg) ->
                     _state.update { current ->
-                        // 替换临时消息为正式消息
+                        // 按 ViewModel 的 ID 移除乐观消息，再换上 ChatService 的正式消息
                         val updatedMessages = current.messages
-                            .filterNot { it.id == userMsg.id }
+                            .filterNot { it.id == userMessage.id }
                             .let { list -> list + listOf(userMsg, assistantMsg) }
                         current.copy(
                             messages = updatedMessages,

@@ -117,6 +117,10 @@ class Live2dView : AutoCloseable {
 
     fun onTouchesBegan(x: Float, y: Float) {
         touchManager.touchesBegan(x, y)
+        // 触摸时立即让模型看向触摸点，而非等到拖动才响应
+        val vx = transformViewX(x)
+        val vy = transformViewY(y)
+        Live2dManager.getInstance().onDrag(vx, vy)
     }
 
     fun onTouchesMoved(x: Float, y: Float) {

@@ -68,6 +68,9 @@ class FloatingLive2dService : Service() {
     private var pinchStartW = 0
     private var pinchStartH = 0
 
+    /** 双击关闭的时间戳（毫秒）。 */
+    private var lastTapTime = 0L
+
     /** Screen-density conversion cache */
     private var _density = 0f
     private val density: Float get() {
@@ -92,6 +95,15 @@ class FloatingLive2dService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * 返回 [START_STICKY] 确保进程被系统杀死后自动重启，
+     * 与服务关联的 Activity 也能随之恢复。
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand: flags=$flags startId=$startId")
+        return START_STICKY
+    }
 
     override fun onDestroy() {
         wasActive = true
@@ -220,13 +232,17 @@ class FloatingLive2dService : Service() {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
-                // When all fingers are up, check if it was a tap
+                // 双击关闭（500ms 内两次点击）
                 if (event.pointerCount <= 1) {
                     pinchStartDist = 0f
                     val dx = event.rawX - dragStartRawX
                     val dy = event.rawY - dragStartRawY
                     if (sqrt((dx * dx + dy * dy).toDouble()) < 15.0) {
-                        stopSelf()  // tap to close
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapTime < 500L) {
+                            stopSelf()  // 双击关闭
+                        }
+                        lastTapTime = now
                     }
                 }
             }
@@ -291,7 +307,7 @@ class FloatingLive2dService : Service() {
             }
 
             // Black background so the window border/shape is visible
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
+            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
             val m = model ?: return
@@ -305,13 +321,17 @@ class FloatingLive2dService : Service() {
             CubismOffscreenManagerAndroid.getInstance().beginFrameProcess()
             projection.loadIdentity()
 
+            // 放大后模型可能偏上，用 translate 下移居中
+            val zoom = 1.4f
             val canvasRatio = m.model!!.canvasHeight / m.model!!.canvasWidth
             if (canvasRatio < displayRatio) {
-                m.modelMatrix!!.setWidth(2.0f)
+                m.modelMatrix!!.setWidth(2.0f * zoom)
                 projection.scale(1.0f, aspect)
+                projection.translateRelative(0f, -0.35f)
             } else {
-                m.modelMatrix!!.setHeight(2.0f)
+                m.modelMatrix!!.setHeight(2.0f * zoom)
                 projection.scale(1.0f / aspect, 1.0f)
+                projection.translateRelative(0f, -0.35f)
             }
 
             viewMatrix.multiplyByMatrix(projection)

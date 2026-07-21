@@ -2,6 +2,7 @@ package com.llz121517.meapet.framework
 
 import android.content.ComponentCallbacks2
 import android.content.Context
+import android.util.Log
 import com.llz121517.meapet.client.KtorHttpClientEngine
 import com.llz121517.meapet.client.OpenAiCompatibleClient
 import com.llz121517.meapet.chat.ChatService
@@ -13,7 +14,6 @@ import com.llz121517.meapet.settings.SettingsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 /**
  * 应用依赖容器（手动 DI / 服务定位器）。
@@ -44,6 +44,9 @@ class AppContainer(
     private val context: Context,
     val config: AppConfig = AppConfig.DEFAULT
 ) {
+    companion object {
+        private const val TAG = "AppContainer"
+    }
     /** 设置管理器（独立，无依赖） */
     val settingsManager: SettingsManager by lazy {
         SettingsManager(context)
@@ -102,10 +105,10 @@ class AppContainer(
     val lifecycleManager: LifecycleManager by lazy {
         LifecycleManager(
             onTrimMemory = { level ->
+                // 只做日志，不在这里调 suspend 函数（系统回调可能在任何线程触发，
+                // 且此时各 lazy 组件可能尚未初始化，容易导致崩溃）
                 if (level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
-                    applicationScope.launch {
-                        memoryRepository.trimCache()
-                    }
+                    Log.i(TAG, "系统内存紧张（level=$level），由各组件自行在下次操作时清理")
                 }
             }
         )

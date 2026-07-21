@@ -24,12 +24,6 @@ import androidx.compose.ui.unit.dp
 
 /**
  * 顶部右上角菜单按钮组件。
- *
- * @param onSettings 设置
- * @param onClearMemory 清除记忆
- * @param onClearConversation 清除对话
- * @param onToggleOverlay 悬浮窗
- * @param onAbout 关于
  */
 @Composable
 fun OverlayMenu(
@@ -37,7 +31,6 @@ fun OverlayMenu(
     onClearMemory: () -> Unit = {},
     onClearConversation: () -> Unit = {},
     onToggleOverlay: () -> Unit = {},
-    onAbout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -100,16 +93,6 @@ fun OverlayMenu(
                 },
                 leadingIcon = {
                     Text("🪟", style = MaterialTheme.typography.bodyLarge)
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("关于") },
-                onClick = {
-                    menuExpanded = false
-                    onAbout()
-                },
-                leadingIcon = {
-                    Text("ℹ", style = MaterialTheme.typography.bodyLarge)
                 }
             )
         }

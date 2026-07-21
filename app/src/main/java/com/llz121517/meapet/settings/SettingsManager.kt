@@ -41,6 +41,8 @@ class SettingsManager(context: Context) {
     private val KEY_ENABLE_AUTO_SUMMARY = booleanPreferencesKey(SettingsKeys.ENABLE_AUTO_SUMMARY)
     private val KEY_SYSTEM_PROMPT = stringPreferencesKey(SettingsKeys.SYSTEM_PROMPT)
     private val KEY_THEME_MODE = stringPreferencesKey(SettingsKeys.THEME_MODE)
+    private val KEY_ENABLE_DYNAMIC_COLOR = booleanPreferencesKey(SettingsKeys.ENABLE_DYNAMIC_COLOR)
+    private val KEY_COLOR_PRESET = stringPreferencesKey(SettingsKeys.COLOR_PRESET)
     private val KEY_FIRST_LAUNCH = booleanPreferencesKey(SettingsKeys.FIRST_LAUNCH)
 
     // ── Flows (响应式订阅) ────────────────────────────
@@ -88,6 +90,16 @@ class SettingsManager(context: Context) {
     /** 主题模式流。 */
     val themeModeFlow: Flow<String> = dataStore.data.map { prefs ->
         prefs[KEY_THEME_MODE] ?: SettingsKeys.Defaults.THEME_MODE
+    }
+
+    /** 动态颜色开关流。 */
+    val enableDynamicColorFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_ENABLE_DYNAMIC_COLOR] ?: SettingsKeys.Defaults.ENABLE_DYNAMIC_COLOR
+    }
+
+    /** 颜色预设流。 */
+    val colorPresetFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_COLOR_PRESET] ?: SettingsKeys.Defaults.COLOR_PRESET
     }
 
     /** 首次启动标记流。 */
@@ -144,6 +156,14 @@ class SettingsManager(context: Context) {
 
     suspend fun setThemeMode(mode: String) {
         dataStore.edit { prefs -> prefs[KEY_THEME_MODE] = mode }
+    }
+
+    suspend fun setEnableDynamicColor(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[KEY_ENABLE_DYNAMIC_COLOR] = enabled }
+    }
+
+    suspend fun setColorPreset(preset: String) {
+        dataStore.edit { prefs -> prefs[KEY_COLOR_PRESET] = preset }
     }
 
     suspend fun markFirstLaunchDone() {

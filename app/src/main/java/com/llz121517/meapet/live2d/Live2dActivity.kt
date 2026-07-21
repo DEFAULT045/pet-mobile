@@ -2,8 +2,12 @@ package com.llz121517.meapet.live2d
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.opengl.GLSurfaceView
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -13,8 +17,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -50,6 +56,25 @@ class Live2dActivity : ComponentActivity() {
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // ── 设置窗口背景色（防止 GLSurfaceView 加载前白底闪烁） ──
+        try {
+            val themeMode = runBlocking {
+                container.settingsManager.themeModeFlow.first()
+            }
+            val isDark = when (themeMode) {
+                "dark" -> true
+                "light" -> false
+                else -> (resources.configuration.uiMode and
+                        Configuration.UI_MODE_NIGHT_MASK) ==
+                        Configuration.UI_MODE_NIGHT_YES
+            }
+            window.setBackgroundDrawable(
+                ColorDrawable(if (isDark) 0xFF141414.toInt() else 0xFFF7F7F7.toInt())
+            )
+        } catch (_: Exception) {
+            window.setBackgroundDrawable(ColorDrawable(0xFF141414.toInt()))
+        }
 
         insetsController = WindowCompat.getInsetsController(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -87,8 +112,34 @@ class Live2dActivity : ComponentActivity() {
                 // 响应式订阅主题设置
                 val themeMode by container.settingsManager.themeModeFlow
                     .collectAsState(initial = "system")
+                val enableDynamicColor by container.settingsManager.enableDynamicColorFlow
+                    .collectAsState(initial = true)
+                val colorPreset by container.settingsManager.colorPresetFlow
+                    .collectAsState(initial = "default")
 
-                MeaPetTheme(themeMode = themeMode) {
+                // 将主题背景色同步到 Live2D GL 层（每次主题变化时更新）
+                val bgColor = remember(themeMode) {
+                    val isDark = when (themeMode) {
+                        "dark" -> true
+                        "light" -> false
+                        else -> (resources.configuration.uiMode and
+                                Configuration.UI_MODE_NIGHT_MASK) ==
+                                Configuration.UI_MODE_NIGHT_YES
+                    }
+                    if (isDark) floatArrayOf(0.08f, 0.08f, 0.08f)  // 深色背景
+                    else floatArrayOf(0.97f, 0.97f, 0.97f)          // 浅色背景
+                }
+                LaunchedEffect(bgColor) {
+                    Live2dDelegate.getInstance().let { d ->
+                        d.bgR = bgColor[0]; d.bgG = bgColor[1]; d.bgB = bgColor[2]; d.bgA = 1.0f
+                    }
+                }
+
+                MeaPetTheme(
+                    themeMode = themeMode,
+                    dynamicColor = enableDynamicColor,
+                    colorPreset = colorPreset
+                ) {
                     ChatScreenContent(
                         onToggleOverlay = { toggleOverlay() }
                     )
@@ -113,6 +164,12 @@ class Live2dActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Live2dDelegate.getInstance().onStart(this)
+
+        // 从桌面返回应用时自动关闭悬浮窗
+        if (FloatingLive2dService.overlayActive) {
+            FloatingLive2dService.overlayActive = false
+            FloatingLive2dService.stop(this)
+        }
     }
 
     override fun onResume() {
@@ -142,7 +199,7 @@ class Live2dActivity : ComponentActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)) {
-                FloatingLive2dService.start(this)
+                startOverlayAndGoBack()
             } else {
                 Log.w(TAG, "Overlay permission not granted")
             }
@@ -166,9 +223,15 @@ class Live2dActivity : ComponentActivity() {
                 return
             }
 
-            FloatingLive2dService.overlayActive = true
-            FloatingLive2dService.start(this)
+            startOverlayAndGoBack()
         }
+    }
+
+    /** 启动悬浮窗并退到桌面。 */
+    private fun startOverlayAndGoBack() {
+        FloatingLive2dService.overlayActive = true
+        FloatingLive2dService.start(this)
+        moveTaskToBack(true)
     }
 
     private fun hideSystemBars() {

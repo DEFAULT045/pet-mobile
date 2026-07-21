@@ -78,10 +78,10 @@ class Live2dManager private constructor() {
         val canvasRatio = m.model!!.canvasHeight / m.model!!.canvasWidth
 
         if (canvasRatio < displayRatio) {
-            m.modelMatrix!!.setWidth(2.0f)
+            m.modelMatrix!!.setWidth(2.4f)  // 放大 20%
             projection.scale(1.0f, aspect)
         } else {
-            m.modelMatrix!!.setHeight(2.0f)
+            m.modelMatrix!!.setHeight(2.4f)
             projection.scale(1.0f / aspect, 1.0f)
         }
 
