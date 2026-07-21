@@ -13,10 +13,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.llz121517.meapet.framework.AppContainer
+import com.llz121517.meapet.framework.MeaPetApplication
 import com.llz121517.meapet.ui.screen.ChatScreenContent
 import com.llz121517.meapet.ui.theme.MeaPetTheme
 
@@ -30,6 +34,12 @@ import com.llz121517.meapet.ui.theme.MeaPetTheme
 class Live2dActivity : ComponentActivity() {
 
     private lateinit var glSurfaceView: GLSurfaceView
+
+    /** 依赖容器。 */
+    private val container: AppContainer by lazy {
+        MeaPetApplication.from(application)
+    }
+
     private var insetsController: WindowInsetsControllerCompat? = null
 
     companion object {
@@ -71,10 +81,14 @@ class Live2dActivity : ComponentActivity() {
             }
         }
 
-        // Layer 2: Compose UI overlay (chat input, menu, etc.)
+        // Layer 2: Compose UI overlay with theme from settings
         val composeView = ComposeView(this).apply {
             setContent {
-                MeaPetTheme {
+                // 响应式订阅主题设置
+                val themeMode by container.settingsManager.themeModeFlow
+                    .collectAsState(initial = "system")
+
+                MeaPetTheme(themeMode = themeMode) {
                     ChatScreenContent(
                         onToggleOverlay = { toggleOverlay() }
                     )
@@ -123,6 +137,7 @@ class Live2dActivity : ComponentActivity() {
     }
 
     @SuppressLint("InlinedApi")
+    @Deprecated("Use registerForActivityResult API instead")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
@@ -146,6 +161,7 @@ class Live2dActivity : ComponentActivity() {
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
                 )
+                @Suppress("DEPRECATION")
                 startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST)
                 return
             }

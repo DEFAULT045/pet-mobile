@@ -4,12 +4,17 @@
 
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 
+    <!-- Required for network requests (OpenAI API) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- Required for floating overlay window -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
+        android:name=".framework.MeaPetApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -19,12 +24,17 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MeaPet">
 
-        <!-- Live2D demo activity -->
+        <!-- Live2D demo activity (launcher) -->
         <activity
             android:name=".live2d.Live2dActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
-            android:screenOrientation="fullUser" />
+            android:screenOrientation="fullUser">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <!-- Floating overlay service -->
         <service
