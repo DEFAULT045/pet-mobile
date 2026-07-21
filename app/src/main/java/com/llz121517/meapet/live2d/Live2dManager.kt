@@ -12,7 +12,6 @@ class Live2dManager private constructor() {
     companion object {
         private const val TAG = "Live2dManager"
 
-        /** The model directory in assets */
         private const val MODEL_DIR_NAME = "live2d/mea_live2d"
         private const val MODEL_JSON_NAME = "mea.model3.json"
 
@@ -39,15 +38,8 @@ class Live2dManager private constructor() {
     private val viewMatrix = CubismMatrix44.create()
     private val projection = CubismMatrix44.create()
 
-    /**
-     * Load the model from assets. Safe to call multiple times.
-     * Must be called after [CubismFramework.initialize].
-     */
     fun loadModel() {
-        if (modelLoaded) {
-            Log.d(TAG, "Model already loaded, skipping")
-            return
-        }
+        if (modelLoaded) return
         val dir = "$MODEL_DIR_NAME/"
         Log.d(TAG, "Loading model from: $dir$MODEL_JSON_NAME")
         try {
@@ -61,7 +53,6 @@ class Live2dManager private constructor() {
     }
 
     fun onUpdate() {
-        // Guard: need model loaded and valid dimensions
         val m = model ?: return
         val delegate = Live2dDelegate.getInstance()
         val width = delegate.windowWidth
@@ -78,7 +69,7 @@ class Live2dManager private constructor() {
         val canvasRatio = m.model!!.canvasHeight / m.model!!.canvasWidth
 
         if (canvasRatio < displayRatio) {
-            m.modelMatrix!!.setWidth(2.4f)  // 放大 20%
+            m.modelMatrix!!.setWidth(2.4f)
             projection.scale(1.0f, aspect)
         } else {
             m.modelMatrix!!.setHeight(2.4f)
@@ -96,8 +87,14 @@ class Live2dManager private constructor() {
         CubismOffscreenManagerAndroid.getInstance().releaseStaleRenderTextures()
     }
 
+    /** 视角跟随：直接设 model 字段，update 内部会读取并应用。 */
     fun onDrag(x: Float, y: Float) {
-        model?.setDragging(x, y)
+        model?.let { m ->
+            m.dragX = x.coerceIn(-1f, 1f)
+            m.dragY = y.coerceIn(-1f, 1f)
+            // 也通知 Cubism SDK 的 dragManager（保留原有 Look 系统兼容）
+            try { m.setDragging(x, y) } catch (_: Exception) {}
+        }
     }
 
     fun setRenderTargetSize(width: Int, height: Int) {

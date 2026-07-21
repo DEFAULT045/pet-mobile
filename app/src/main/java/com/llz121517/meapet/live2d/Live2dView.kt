@@ -24,7 +24,6 @@ class Live2dView : AutoCloseable {
     private val renderingBuffer = CubismRenderTargetAndroid()
     private var renderingSprite: Live2dSprite? = null
     private var spriteShader: Live2dSpriteShader? = null
-    private val touchManager = TouchManager()
 
     override fun close() {
         renderingBuffer.destroyRenderTarget()
@@ -113,26 +112,7 @@ class Live2dView : AutoCloseable {
         clearColor[2] = b
     }
 
-    // ---- touch handling ----
-
-    fun onTouchesBegan(x: Float, y: Float) {
-        touchManager.touchesBegan(x, y)
-        // 触摸时立即让模型看向触摸点，而非等到拖动才响应
-        val vx = transformViewX(x)
-        val vy = transformViewY(y)
-        Live2dManager.getInstance().onDrag(vx, vy)
-    }
-
-    fun onTouchesMoved(x: Float, y: Float) {
-        val vx = transformViewX(touchManager.getLastX())
-        val vy = transformViewY(touchManager.getLastY())
-        touchManager.touchesMoved(x, y)
-        Live2dManager.getInstance().onDrag(vx, vy)
-    }
-
-    fun onTouchesEnded(x: Float, y: Float) {
-        Live2dManager.getInstance().onDrag(0.0f, 0.0f)
-    }
+    // ---- touch handling (delegate handles directly via normalized coords) ----
 
     // ---- pre/post model draw hooks for offscreen rendering ----
 

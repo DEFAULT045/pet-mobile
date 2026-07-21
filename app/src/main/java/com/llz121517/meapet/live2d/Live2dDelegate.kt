@@ -41,8 +41,6 @@ class Live2dDelegate private constructor() {
     @Volatile
     private var isActive = false
     private var isCaptured = false
-    private var mouseX = 0.0f
-    private var mouseY = 0.0f
 
     /** 背景色 RGBA（0~1），跟随主题变化。默认浅色。 */
     @Volatile
@@ -121,8 +119,6 @@ class Live2dDelegate private constructor() {
     }
 
     fun run() {
-        // If overlay just closed, reset the CubismShaderAndroid singleton
-        // (it has overlay's shader programs from a different GL context)
         if (FloatingLive2dService.wasActive && !FloatingLive2dService.overlayActive) {
             CubismShaderAndroid.getInstance().releaseInvalidShaderProgram()
             CubismShaderAndroid.deleteInstance()
@@ -130,7 +126,6 @@ class Live2dDelegate private constructor() {
             Log.d(TAG, "Shader state reset after overlay closed")
         }
 
-        // Skip rendering when floating overlay is active
         if (FloatingLive2dService.overlayActive) return
 
         Live2dPal.updateTime()
@@ -150,25 +145,37 @@ class Live2dDelegate private constructor() {
         }
     }
 
+    // ── 触摸跟随 ──
+    // 像素坐标 → 归一化 [-1, 1]（Y 轴翻转：Android 顶部=0，OpenGL 底部=-1）
+
     fun onTouchBegan(x: Float, y: Float) {
         mouseX = x
         mouseY = y
         isCaptured = true
-        view.onTouchesBegan(mouseX, mouseY)
+        if (windowWidth > 0 && windowHeight > 0) {
+            val nx = (x / windowWidth) * 2f - 1f
+            val ny = -((y / windowHeight) * 2f - 1f)
+            Live2dManager.getInstance().onDrag(nx, ny)
+        }
     }
 
     fun onTouchEnd(x: Float, y: Float) {
         mouseX = x
         mouseY = y
         isCaptured = false
-        view.onTouchesEnded(mouseX, mouseY)
+        Live2dManager.getInstance().onDrag(0.0f, 0.0f)
     }
 
     fun onTouchMoved(x: Float, y: Float) {
         mouseX = x
         mouseY = y
-        if (isCaptured) {
-            view.onTouchesMoved(mouseX, mouseY)
+        if (isCaptured && windowWidth > 0 && windowHeight > 0) {
+            val nx = (x / windowWidth) * 2f - 1f
+            val ny = -((y / windowHeight) * 2f - 1f)
+            Live2dManager.getInstance().onDrag(nx, ny)
         }
     }
+
+    private var mouseX = 0f
+    private var mouseY = 0f
 }

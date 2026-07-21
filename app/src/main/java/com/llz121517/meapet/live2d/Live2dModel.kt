@@ -42,6 +42,10 @@ class Live2dModel(modelDirName: String) : CubismUserModel() {
     private var modelHomeDirectory = modelDirName
     private var modelSetting: ICubismModelSetting? = null
 
+    /** 触摸视角跟随的拖拽值（由 Live2dManager 每帧设置）。 */
+    var dragX = 0.0f
+    var dragY = 0.0f
+
     private val motions = mutableMapOf<String, ACubismMotion>()
     private val expressions = mutableMapOf<String, ACubismMotion>()
     private val eyeBlinkIds = mutableListOf<CubismId>()
@@ -100,6 +104,10 @@ class Live2dModel(modelDirName: String) : CubismUserModel() {
 
         model!!.saveParameters()
         updateScheduler.onLateUpdate(model!!, deltaTimeSeconds)
+
+        // 在 model!!.update() 之前应用视角跟随参数，确保本帧生效
+        applyDragLook(dragX, dragY)
+
         model!!.update()
 
         isUpdated(true)
@@ -179,6 +187,21 @@ class Live2dModel(modelDirName: String) : CubismUserModel() {
      * Get the model home directory.
      */
     fun getModelHomeDirectory(): String = modelHomeDirectory
+
+    /**
+     * 根据触摸位置直接设置模型角度和视线参数。
+     * 绕过 Cubism Look 系统，更可靠地实现视角跟随。
+     *
+     * @param dx 归一化触摸 X [-1..1]
+     * @param dy 归一化触摸 Y [-1..1]
+     */
+    fun applyDragLook(dx: Float, dy: Float) {
+        val m = model ?: return
+        m.setParameterValue(idParamAngleX, dx * 30.0f)
+        m.setParameterValue(idParamAngleY, dy * 15.0f)
+        m.setParameterValue(idParamEyeBallX, dx)
+        m.setParameterValue(idParamEyeBallY, -dy)
+    }
 
     /**
      * (Re-)bind textures using a custom texture manager.

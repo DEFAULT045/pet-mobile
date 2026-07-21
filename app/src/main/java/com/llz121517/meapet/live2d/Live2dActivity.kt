@@ -87,23 +87,8 @@ class Live2dActivity : ComponentActivity() {
             setRenderer(Live2dRenderer())
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
             setPreserveEGLContextOnPause(true)
-
-            // Forward touches to Live2D delegate
-            setOnTouchListener { _: View, event: MotionEvent ->
-                val px = event.x
-                val py = event.y
-                queueEvent {
-                    when (event.action) {
-                        MotionEvent.ACTION_DOWN ->
-                            Live2dDelegate.getInstance().onTouchBegan(px, py)
-                        MotionEvent.ACTION_UP ->
-                            Live2dDelegate.getInstance().onTouchEnd(px, py)
-                        MotionEvent.ACTION_MOVE ->
-                            Live2dDelegate.getInstance().onTouchMoved(px, py)
-                    }
-                }
-                true
-            }
+            // 注意：ComposeView 覆盖在 GLSurfaceView 之上，会拦截触摸事件。
+            // 因此不在 GLSurfaceView 设 onTouchListener，而是在根布局 dispatchTouchEvent 中处理。
         }
 
         // Layer 2: Compose UI overlay with theme from settings
@@ -147,7 +132,26 @@ class Live2dActivity : ComponentActivity() {
             }
         }
 
-        val root = FrameLayout(this).apply {
+        val root = object : FrameLayout(this) {
+            // ComposeView 会拦截触摸事件导致 GLSurfaceView 收不到。
+            // 在 dispatchTouchEvent 层截取事件，赶在 ComposeView 处理前转发给 Live2D。
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                try {
+                    val ev = event ?: return super.dispatchTouchEvent(null)
+                    glSurfaceView.queueEvent {
+                        when (ev.action) {
+                            MotionEvent.ACTION_DOWN ->
+                                Live2dDelegate.getInstance().onTouchBegan(ev.x, ev.y)
+                            MotionEvent.ACTION_UP ->
+                                Live2dDelegate.getInstance().onTouchEnd(ev.x, ev.y)
+                            MotionEvent.ACTION_MOVE ->
+                                Live2dDelegate.getInstance().onTouchMoved(ev.x, ev.y)
+                        }
+                    }
+                } catch (_: Exception) { /* 触摸截取失败不影响正常 UI */ }
+                return super.dispatchTouchEvent(event)
+            }
+        }.apply {
             addView(glSurfaceView, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
