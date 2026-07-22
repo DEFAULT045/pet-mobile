@@ -39,7 +39,8 @@ data class SettingsUiState(
     val enableAutoSummary: Boolean = SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY,
     val themeMode: String = SettingsKeys.Defaults.THEME_MODE,
     val enableDynamicColor: Boolean = SettingsKeys.Defaults.ENABLE_DYNAMIC_COLOR,
-    val colorPreset: String = SettingsKeys.Defaults.COLOR_PRESET
+    val colorPreset: String = SettingsKeys.Defaults.COLOR_PRESET,
+    val appVersion: String = ""
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -112,6 +113,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 _state.update { it.copy(colorPreset = preset) }
             }
         }
+
+        // 从 PackageManager 读取版本号
+        val version = try {
+            application.packageManager.getPackageInfo(application.packageName, 0).versionName ?: "1.0.0"
+        } catch (_: Exception) { "1.0.0" }
+        _state.update { it.copy(appVersion = version) }
     }
 
     // ── 更新方法 ──────────────────────────────────────

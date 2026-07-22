@@ -120,6 +120,13 @@ fun SettingsScreen(
             // ══════════════════════════════════════════
             SectionTitle("API 配置")
 
+            Text(
+                "需要一个 OpenAI 兼容的 API 端点",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
             OutlinedTextField(
                 value = localApiKey,
                 onValueChange = {
@@ -146,7 +153,7 @@ fun SettingsScreen(
                         )
                     }
                 },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
             )
 
             Spacer(Modifier.height(8.dp))
@@ -303,13 +310,13 @@ fun SettingsScreen(
                     Text("MeaPet —— 梅尔桌宠", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "基于 Live2D + AI 的虚拟宠物聊天应用",
+                        "一只基于 Live2D 的 AI 梅尔 非常不完善 但是初版花了我 0.14B Tokens",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "版本 1.0.0",
+                        "版本 ${state.appVersion}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

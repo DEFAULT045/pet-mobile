@@ -152,7 +152,7 @@ class Live2dModel(modelDirName: String) : CubismUserModel() {
     fun draw(matrix: CubismMatrix44) {
         if (model == null) {
             try {
-                Live2dDelegate.getInstance().activity.finish()
+                Live2dDelegate.getInstance().activity?.finish()
             } catch (_: Exception) { /* not always in an activity */ }
             return
         }
@@ -213,7 +213,7 @@ class Live2dModel(modelDirName: String) : CubismUserModel() {
             val texName = ms.getTextureFileName(i)
             if (texName.isEmpty()) continue
             val texPath = modelHomeDirectory + texName
-            val texInfo = tm.createTextureFromPngFile(texPath)
+            val texInfo = tm.createTextureFromPngFile(texPath) ?: continue
             castRenderer<CubismRendererAndroid>().bindTexture(i, texInfo.id)
             castRenderer<CubismRendererAndroid>().isPremultipliedAlpha(Live2dDefine.PREMULTIPLIED_ALPHA_ENABLE)
         }
@@ -233,7 +233,7 @@ class Live2dModel(modelDirName: String) : CubismUserModel() {
                 CubismFramework.coreLogFunction("[ERROR] model3.json is not found")
             }
             try {
-                Live2dDelegate.getInstance().activity.finish()
+                Live2dDelegate.getInstance().activity?.finish()
             } catch (_: Exception) { /* overlay mode — no activity to finish */ }
             return false
         }
@@ -347,7 +347,7 @@ class Live2dModel(modelDirName: String) : CubismUserModel() {
             val texPath = modelHomeDirectory + texName
             val texInfo = Live2dDelegate.getInstance()
                 .textureManager
-                .createTextureFromPngFile(texPath)
+                .createTextureFromPngFile(texPath) ?: continue
 
             castRenderer<CubismRendererAndroid>().bindTexture(i, texInfo.id)
             castRenderer<CubismRendererAndroid>().isPremultipliedAlpha(Live2dDefine.PREMULTIPLIED_ALPHA_ENABLE)

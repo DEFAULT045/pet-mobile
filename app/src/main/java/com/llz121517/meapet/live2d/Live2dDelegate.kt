@@ -27,11 +27,13 @@ class Live2dDelegate private constructor() {
 
     @Volatile
     private var _activity: Activity? = null
-    val activity: Activity get() = _activity!!
-    // 暴露给其他 Live2D 模块（非空，但在 GL 线程安全地用 try-catch 保护）
+    /** 安全获取 Activity，可能为 null（GL 线程中可能尚未赋值或被销毁）。 */
+    val activity: Activity? get() = _activity
+    // 各调用方已用 try-catch 保护，使用时注意空安全
 
     val textureManager = Live2dTextureManager()
-    val view = Live2dView()
+    var view = Live2dView()
+        private set
 
     var windowWidth = 0
         private set
@@ -88,12 +90,13 @@ class Live2dDelegate private constructor() {
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
 
+        // 旧 GL 上下文已失效，彻底清理并重建（CSDN 文章指出的关键）
         textureManager.releaseInvalidTextures()
         view.close()
+        view = Live2dView()           // ← 创建新 View，官方示例就是这样做的
 
         Live2dPal.updateTime()
 
-        // Initialize Cubism Framework (must happen in GL thread)
         if (!CubismFramework.isInitialized()) {
             CubismFramework.initialize()
             Log.d(TAG, "CubismFramework initialized")
@@ -102,11 +105,9 @@ class Live2dDelegate private constructor() {
         CubismShaderAndroid.getInstance().releaseInvalidShaderProgram()
         CubismShaderAndroid.deleteInstance()
 
-        // Load Live2D model (must happen after CubismFramework.initialize)
-        Live2dManager.getInstance().loadModel()
+        // 强制重新加载模型（重置 modelLoaded，在新 GL 上下文中重绑纹理）
+        Live2dManager.getInstance().resetModel()
 
-        // Reload renderer for GL context
-        Live2dManager.getInstance().model?.reloadRenderer()
         Log.d(TAG, "onSurfaceCreated complete")
     }
 
@@ -124,7 +125,8 @@ class Live2dDelegate private constructor() {
 
     fun run() {
         if (FloatingLive2dService.wasActive && !FloatingLive2dService.overlayActive) {
-            CubismShaderAndroid.getInstance().releaseInvalidShaderProgram()
+            // 悬浮窗的 GL 上下文已销毁，它的 shader 在当前上下文无效。
+            // 跳过 releaseInvalidShaderProgram（跨上下文 GL 操作会崩溃），直接重建。
             CubismShaderAndroid.deleteInstance()
             FloatingLive2dService.wasActive = false
             Log.d(TAG, "Shader state reset after overlay closed")

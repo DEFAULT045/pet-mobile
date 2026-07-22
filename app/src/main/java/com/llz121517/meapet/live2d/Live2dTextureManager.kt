@@ -15,11 +15,12 @@ class Live2dTextureManager {
         val filePath: String
     )
 
-    fun createTextureFromPngFile(filePath: String): TextureInfo {
+    fun createTextureFromPngFile(filePath: String): TextureInfo? {
         // Return cached texture if already loaded
         textures.find { it.filePath == filePath }?.let { return it }
 
-        val assetManager = Live2dDelegate.getInstance().activity.assets
+        val activity = Live2dDelegate.getInstance().activity ?: return null
+        val assetManager = activity.assets
         val stream = assetManager.open(filePath)
 
         val options = BitmapFactory.Options().apply {

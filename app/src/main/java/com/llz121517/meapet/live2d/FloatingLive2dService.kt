@@ -108,6 +108,9 @@ class FloatingLive2dService : Service() {
     override fun onDestroy() {
         wasActive = true
         overlayActive = false
+        // 先停 GL 线程再移除视图，防止渲染与 detach 竞态崩溃
+        glSurfaceView.queueEvent { /* 标记 GL 线程停止 */ }
+        glSurfaceView.onPause()
         windowManager?.removeView(glSurfaceView)
         windowManager = null
         super.onDestroy()

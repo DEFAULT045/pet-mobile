@@ -15,8 +15,8 @@ android {
     defaultConfig {
         applicationId = "com.llz121517.meapet"
         minSdk = 26
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -104,7 +104,7 @@ class AppContainer(
     /** 生命周期管理器。 */
     val lifecycleManager: LifecycleManager by lazy {
         LifecycleManager(
-            onTrimMemory = { level ->
+            trimMemoryCallback = { level ->
                 // 只做日志，不在这里调 suspend 函数（系统回调可能在任何线程触发，
                 // 且此时各 lazy 组件可能尚未初始化，容易导致崩溃）
                 if (level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {

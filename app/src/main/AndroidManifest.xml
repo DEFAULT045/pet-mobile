@@ -24,11 +24,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MeaPet">
 
-        <!-- Live2D demo activity (launcher) -->
+        <!-- 主入口（框架层） -->
         <activity
-            android:name=".live2d.Live2dActivity"
+            android:name=".framework.MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:screenOrientation="fullUser">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

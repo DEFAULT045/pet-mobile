@@ -49,6 +49,14 @@ class Live2dManager private constructor() {
     private val viewMatrix = CubismMatrix44.create()
     private val projection = CubismMatrix44.create()
 
+    /** 在 GL 上下文重建时强制重新加载模型（旧上下文的纹理已失效）。 */
+    fun resetModel() {
+        modelLoaded = false
+        model?.deleteModel()
+        model = null
+        loadModel()
+    }
+
     fun loadModel() {
         if (modelLoaded) return
         val dir = "$MODEL_DIR_NAME/"
