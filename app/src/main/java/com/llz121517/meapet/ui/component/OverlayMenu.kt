@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun OverlayMenu(
     onSettings: () -> Unit = {},
-    onClearMemory: () -> Unit = {},
     onClearConversation: () -> Unit = {},
     onToggleOverlay: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -73,16 +72,6 @@ fun OverlayMenu(
                 },
                 leadingIcon = {
                     Text("🗨", style = MaterialTheme.typography.bodyLarge)
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("清除记忆") },
-                onClick = {
-                    menuExpanded = false
-                    onClearMemory()
-                },
-                leadingIcon = {
-                    Text("🗑", style = MaterialTheme.typography.bodyLarge)
                 }
             )
             DropdownMenuItem(

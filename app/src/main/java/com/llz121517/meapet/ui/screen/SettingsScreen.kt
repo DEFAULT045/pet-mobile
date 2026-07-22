@@ -299,25 +299,49 @@ fun SettingsScreen(
                 )
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("MeaPet", style = MaterialTheme.typography.titleMedium)
+                    // ── 标题与简介 ──
+                    Text("MeaPet —— 梅尔桌宠", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "基于 Live2D + AI 的虚拟宠物聊天应用",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "版本 1.0.0",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
                     Spacer(Modifier.height(8.dp))
                     HorizontalDivider()
                     Spacer(Modifier.height(8.dp))
+
+                    // ── 开发与技术 ──
                     Text(
-                        "基于 Live2D + AI 的虚拟宠物聊天应用。",
+                        "借助 Claude Code CLI，由 DeepSeek V4 Flash 强力赋能辅助开发",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Author: llz121517 (GitHub)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "反馈/交流 QQ: 748791823",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         "技术栈：Live2D Cubism · Jetpack Compose · Ktor · Coroutines",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 }
             }

@@ -3,6 +3,8 @@ package com.llz121517.meapet.live2d
 import android.util.Log
 import com.live2d.sdk.cubism.framework.math.CubismMatrix44
 import com.live2d.sdk.cubism.framework.rendering.android.CubismOffscreenManagerAndroid
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * Singleton manager that owns the Live2D model and drives update/draw.
@@ -27,6 +29,15 @@ class Live2dManager private constructor() {
         fun releaseInstance() {
             CubismOffscreenManagerAndroid.releaseInstance()
             instance = null
+        }
+
+        /** 触摸分区触发的消息事件流。ChatViewModel 收集此流显示气泡。 */
+        private val _tapMessage = MutableSharedFlow<String>(extraBufferCapacity = 4)
+        val tapMessageEvent = _tapMessage.asSharedFlow()
+
+        /** 发送分区消息。可由任意线程调用。 */
+        fun emitTapMessage(text: String) {
+            _tapMessage.tryEmit(text)
         }
     }
 

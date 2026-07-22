@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llz121517.meapet.chat.ChatEvent
+import com.llz121517.meapet.live2d.Live2dDelegate
 import com.llz121517.meapet.ui.component.ChatBubble
 import com.llz121517.meapet.ui.component.ChatInputBar
 import com.llz121517.meapet.ui.component.OverlayMenu
@@ -55,6 +56,11 @@ fun ChatScreenContent(
     // 在设置页时拦截系统返回键 → 回到聊天页
     BackHandler(enabled = currentPage == Page.SETTINGS) {
         currentPage = Page.CHAT
+    }
+
+    // 切换页面时同步触摸分区开关（设置页内禁止穿透）
+    LaunchedEffect(currentPage) {
+        Live2dDelegate.getInstance().zoneTouchEnabled = currentPage == Page.CHAT
     }
 
     AnimatedContent(
@@ -176,9 +182,6 @@ private fun ChatPage(
         // ── Layer 2: 顶部菜单 ──
         OverlayMenu(
             onToggleOverlay = onToggleOverlay,
-            onClearMemory = {
-                chatViewModel.onEvent(ChatEvent.ClearMemory)
-            },
             onClearConversation = {
                 chatViewModel.onEvent(ChatEvent.ClearConversation)
             },

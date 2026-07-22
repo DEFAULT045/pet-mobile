@@ -9,6 +9,7 @@ import com.llz121517.meapet.chat.ChatRole
 import com.llz121517.meapet.chat.ChatService
 import com.llz121517.meapet.chat.ChatUiState
 import com.llz121517.meapet.framework.MeaPetApplication
+import com.llz121517.meapet.live2d.Live2dManager
 import com.llz121517.meapet.memory.MemoryManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +44,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val existingMessages = chatService.getHistory()
         if (existingMessages.isNotEmpty()) {
             _state.update { it.copy(messages = existingMessages) }
+        }
+
+        // 监听 Live2D 触摸分区事件→添加系统消息气泡，超时后自动移除
+        viewModelScope.launch {
+            Live2dManager.tapMessageEvent.collect { text ->
+                val newMsg = ChatMessage(role = ChatRole.system, content = text)
+                _state.update { it.copy(messages = it.messages + newMsg) }
+
+                // 按"当前系统消息总数"决定此条消息的存活时长
+                val sysCount = _state.value.messages.count { it.role == ChatRole.system }
+                val timeout = when {
+                    sysCount > 5 -> 2000L
+                    sysCount > 3 -> 4000L
+                    else -> 7000L
+                }
+                // 延时后移除（新消息推旧→消失前一直可见，自然积累后加速淘汰）
+                launch {
+                    kotlinx.coroutines.delay(timeout)
+                    _state.update {
+                        it.copy(messages = it.messages.filterNot { m -> m.id == newMsg.id })
+                    }
+                }
+            }
         }
     }
 
