@@ -260,6 +260,45 @@ class OpenAiCompatibleClientTest {
     }
 
     @Test
+    fun baseUrlAutoAppendsV1ForProxyHosts() = runTest {
+        // 常见中转只填主机，由客户端自动补 /v1/...
+        val cases = listOf(
+            "https://proxy.example.com" to "https://proxy.example.com/v1/models",
+            "https://proxy.example.com/" to "https://proxy.example.com/v1/models",
+            "https://proxy.example.com/v1" to "https://proxy.example.com/v1/models",
+            "https://proxy.example.com/v1/" to "https://proxy.example.com/v1/models"
+        )
+        for ((input, expected) in cases) {
+            val fakeEngine = FakeHttpClientEngine { request ->
+                assertEquals(expected, request.url, "baseUrl=$input")
+                HttpResponse(200, "{}".encodeToByteArray(), "application/json")
+            }
+            OpenAiCompatibleClient(
+                apiKey = "sk-test",
+                baseUrl = input,
+                engine = fakeEngine
+            ).listModels()
+        }
+    }
+
+    @Test
+    fun normalizeBaseUrlStripsTrailingV1Only() {
+        assertEquals(
+            "https://api.openai.com",
+            OpenAiCompatibleClient.normalizeBaseUrl("https://api.openai.com/v1/")
+        )
+        assertEquals(
+            "https://gateway.example.com/openai",
+            OpenAiCompatibleClient.normalizeBaseUrl("https://gateway.example.com/openai/v1")
+        )
+        // 中间的 /v1 路径段要保留（代理前缀）
+        assertEquals(
+            "https://gateway.example.com/v1/proxy",
+            OpenAiCompatibleClient.normalizeBaseUrl("https://gateway.example.com/v1/proxy/")
+        )
+    }
+
+    @Test
     fun chatCompletionRequestBodyContainsMaxTokens() = runTest {
         val body = ApiRequest.chatCompletion(
             model = "gpt-4o-mini",

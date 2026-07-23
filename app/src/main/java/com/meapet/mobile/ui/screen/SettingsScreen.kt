@@ -191,7 +191,7 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .onFocusChanged { if (!it.isFocused) settingsViewModel.saveApiUrl(localApiUrl) },
                 singleLine = true,
-                placeholder = { Text("https://api.openai.com") }
+                placeholder = { Text("https://api.openai.com（自动补 /v1）") }
             )
 
             Spacer(Modifier.height(16.dp))
