@@ -27,9 +27,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,10 +40,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -48,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -113,6 +120,13 @@ fun SettingsScreen(
             settingsViewModel.saveApiUrl(localApiUrl)
             settingsViewModel.saveModel(localModel)
             settingsViewModel.saveSystemPrompt(localSystemPrompt)
+        }
+    }
+
+    // 从列表点选模型时，同步本地输入框
+    LaunchedEffect(state.model) {
+        if (localModel != state.model) {
+            localModel = state.model
         }
     }
 
@@ -211,6 +225,101 @@ fun SettingsScreen(
                 singleLine = true,
                 placeholder = { Text("gpt-4o-mini") }
             )
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    // 先落盘当前编辑中的 Key/URL，再拉列表
+                    settingsViewModel.saveApiKey(localApiKey)
+                    settingsViewModel.saveApiUrl(localApiUrl)
+                    settingsViewModel.fetchModels(localApiKey, localApiUrl)
+                },
+                enabled = !state.isLoadingModels,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (state.isLoadingModels) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("获取中…")
+                } else {
+                    Text("获取模型列表")
+                }
+            }
+
+            state.modelsError?.let { err ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = err,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { settingsViewModel.dismissModelsError() }
+                )
+            }
+
+            if (state.availableModels.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "共 ${state.availableModels.size} 个模型，点选填入上方",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+                Spacer(Modifier.height(4.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(state.availableModels, key = { it }) { modelId ->
+                            val selected = modelId == localModel
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        localModel = modelId
+                                        settingsViewModel.selectModel(modelId)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = modelId,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (selected)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = "已选中",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
 

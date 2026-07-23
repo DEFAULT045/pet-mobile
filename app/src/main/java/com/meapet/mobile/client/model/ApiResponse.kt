@@ -1,6 +1,8 @@
 package com.meapet.mobile.client.model
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -29,5 +31,26 @@ object ApiResponse {
             ?.jsonPrimitive?.contentOrNull
     } catch (_: Exception) {
         null
+    }
+
+    /**
+     * 从 `/v1/models` 响应中提取模型 id 列表。
+     *
+     * 兼容常见 OpenAI 兼容网关：优先读 `data[].id`；若顶层是数组则直接读每项 `id`。
+     * 结果去重、去空、按字母序排序。
+     */
+    fun modelIds(body: String): List<String> = try {
+        val root = json.parseToJsonElement(body)
+        val array: JsonArray = when (root) {
+            is JsonObject -> root["data"] as? JsonArray ?: return emptyList()
+            is JsonArray -> root
+            else -> return emptyList()
+        }
+        array.mapNotNull { element ->
+            (element as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        }.distinct().sorted()
+    } catch (_: Exception) {
+        emptyList()
     }
 }

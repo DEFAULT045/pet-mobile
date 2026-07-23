@@ -3,29 +3,29 @@ package com.meapet.mobile.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.meapet.mobile.client.OpenAiCompatibleClient
+import com.meapet.mobile.client.exception.ApiException
+import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.framework.MeaPetApplication
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.settings.SettingsManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 设置界面 ViewModel。
  *
- * @property apiKey API Key（不可逆，仅显示掩码）
- * @property apiUrl API 基础 URL
+ * @property apiKey API Key
+ * @property apiUrl API 根地址（通常以 `/v1` 结尾）
  * @property model 模型名
- * @property temperature Temperature 值
- * @property maxTokens 最大 Token 数
- * @property systemPrompt 系统提示词
- * @property enableMemory 是否启用记忆
- * @property enableAutoSummary 是否启用自动摘要
- * @property themeMode 主题模式
+ * @property availableModels 从 API 拉取的模型 id 列表
+ * @property isLoadingModels 是否正在拉取模型列表
+ * @property modelsError 拉取失败时的错误信息
  */
 data class SettingsUiState(
     val apiKey: String = "",
@@ -40,7 +40,10 @@ data class SettingsUiState(
     val themeMode: String = SettingsKeys.Defaults.THEME_MODE,
     val enableDynamicColor: Boolean = SettingsKeys.Defaults.ENABLE_DYNAMIC_COLOR,
     val colorPreset: String = SettingsKeys.Defaults.COLOR_PRESET,
-    val appVersion: String = ""
+    val appVersion: String = "",
+    val availableModels: List<String> = emptyList(),
+    val isLoadingModels: Boolean = false,
+    val modelsError: String? = null
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -199,6 +202,93 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun updateColorPreset(preset: String) {
         viewModelScope.launch { settingsManager.setColorPreset(preset) }
+    }
+
+    /**
+     * 用当前表单里的 Key / URL 拉取模型列表。
+     *
+     * 会先把 Key、URL 落盘并重建客户端（与后续聊天共用同一配置），
+     * 再用临时客户端请求 `/v1/models`，避免依赖 lazy 初始化时机。
+     */
+    fun fetchModels(apiKey: String, apiUrl: String) {
+        if (apiKey.isBlank()) {
+            _state.update { it.copy(modelsError = "请先填写 API Key") }
+            return
+        }
+        if (apiUrl.isBlank()) {
+            _state.update { it.copy(modelsError = "请先填写 API 地址") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update {
+                it.copy(isLoadingModels = true, modelsError = null)
+            }
+            // 先落盘当前表单值，保证后续聊天与拉取用同一配置
+            if (apiKey != settingsManager.getApiKey()) {
+                settingsManager.setApiKey(apiKey)
+            }
+            if (apiUrl != settingsManager.getApiUrl()) {
+                settingsManager.setApiUrl(apiUrl)
+            }
+            container.reloadClient()
+
+            val result = withContext(Dispatchers.IO) {
+                val client = OpenAiCompatibleClient(apiKey = apiKey, baseUrl = apiUrl)
+                try {
+                    Result.success(ApiResponse.modelIds(client.listModels()))
+                } catch (e: Exception) {
+                    Result.failure(e)
+                } finally {
+                    client.close()
+                }
+            }
+
+            result.fold(
+                onSuccess = { ids ->
+                    if (ids.isEmpty()) {
+                        _state.update {
+                            it.copy(
+                                availableModels = emptyList(),
+                                isLoadingModels = false,
+                                modelsError = "接口未返回任何模型"
+                            )
+                        }
+                    } else {
+                        _state.update {
+                            it.copy(
+                                availableModels = ids,
+                                isLoadingModels = false,
+                                modelsError = null
+                            )
+                        }
+                    }
+                },
+                onFailure = { e ->
+                    val message = when (e) {
+                        is ApiException -> "请求失败 (${e.statusCode})"
+                        else -> e.message?.takeIf { it.isNotBlank() } ?: "获取模型列表失败"
+                    }
+                    _state.update {
+                        it.copy(
+                            isLoadingModels = false,
+                            modelsError = message
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    /** 从拉取结果中选中一个模型，写回本地设置。 */
+    fun selectModel(model: String) {
+        viewModelScope.launch {
+            if (model == settingsManager.getModel()) return@launch
+            settingsManager.setModel(model)
+        }
+    }
+
+    fun dismissModelsError() {
+        _state.update { it.copy(modelsError = null) }
     }
 
     // ── 工具 ──────────────────────────────────────────
