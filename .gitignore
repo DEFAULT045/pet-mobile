@@ -17,3 +17,4 @@ local.properties
 /.idea/
 /.kotlin/
 /.claude/
+/app/libs/
