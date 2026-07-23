@@ -10,11 +10,14 @@ import com.meapet.mobile.client.exception.ApiException
  * - 所有 API 返回原始 JSON 字符串或二进制字节数组，由调用方自行解析；
  * - HTTP 引擎通过 [HttpClientEngine] 抽象注入，默认使用 Ktor CIO；
  * - 所有公开方法均为 `suspend`，原生协程支持；
- * - 路径统一由 [apiUrl] 自动拼接：用户只需填基址（可带或不带 `/v1`），
- *   客户端负责补上 `/v1/...` 后续路径。
+ * - 用户在设置里填的是 **API 根**（通常以 `/v1` 结尾），客户端只自动补齐后面的请求路径
+ *   （`/chat/completions`、`/models` 等）。
+ *
+ * 例如填 `https://api.openai.com/v1` → 实际请求 `https://api.openai.com/v1/chat/completions`。
+ * 若用户只填了 `https://api.openai.com`，也会自动补上 `/v1` 再拼后续路径。
  *
  * @param apiKey API 密钥
- * @param baseUrl 基础 URL，例如 `https://api.openai.com` 或 `https://xxx.com/v1`（尾部 `/` 与 `/v1` 会自动规范化）
+ * @param baseUrl API 根地址，例如 `https://api.openai.com/v1`
  * @param engine HTTP 引擎，单元测试可注入 Fake 实现
  */
 class OpenAiCompatibleClient(
@@ -24,13 +27,13 @@ class OpenAiCompatibleClient(
 ) {
 
     /**
-     * 规范化后的基址（**不含** `/v1`）：
-     * - 去掉空白与尾部 `/`
-     * - 若末尾已是 `/v1` 则剥掉，避免拼出 `/v1/v1/...`
+     * 规范化后的 API 根（**一定以 `/v1` 结尾**，无尾部 `/`）：
+     * - 去空白、去尾部 `/`
+     * - 若末尾还不是 `/v1`，自动补上
      */
     private val baseUrl: String = normalizeBaseUrl(baseUrl)
 
-    /** `GET /v1/models` */
+    /** `GET .../models`（完整路径为 `{base}/models`，base 已含 `/v1`） */
     suspend fun listModels(): String {
         val request = HttpRequest(
             method = HttpMethod.GET,
@@ -40,7 +43,7 @@ class OpenAiCompatibleClient(
         return executeExpectText(request)
     }
 
-    /** `POST /v1/chat/completions` */
+    /** `POST .../chat/completions` */
     suspend fun chatCompletion(requestBody: String): String {
         val request = HttpRequest(
             method = HttpMethod.POST,
@@ -51,7 +54,7 @@ class OpenAiCompatibleClient(
         return executeExpectText(request)
     }
 
-    /** `POST /v1/audio/transcriptions` */
+    /** `POST .../audio/transcriptions` */
     suspend fun createTranscription(parts: List<MultipartPart>): String {
         val request = HttpRequest(
             method = HttpMethod.POST,
@@ -62,7 +65,7 @@ class OpenAiCompatibleClient(
         return executeExpectText(request)
     }
 
-    /** `POST /v1/audio/speech` */
+    /** `POST .../audio/speech` */
     suspend fun createSpeech(requestBody: String): ByteArray {
         val request = HttpRequest(
             method = HttpMethod.POST,
@@ -74,24 +77,28 @@ class OpenAiCompatibleClient(
     }
 
     /**
-     * 拼出完整 API 地址：`{base}/v1/{path}`。
+     * 在已含 `/v1` 的基址后补齐请求路径。
      *
-     * @param path `/v1` 之后的路径片段，可带或不带前导 `/`，
-     *   例如 `"models"` / `"chat/completions"` / `"/audio/speech"`
+     * @param path `/v1` 之后的路径，例如 `"chat/completions"` / `"models"`
      */
     private fun apiUrl(path: String): String {
         val cleaned = path.trim().trimStart('/')
         require(cleaned.isNotEmpty()) { "API path must not be empty" }
-        return "$baseUrl/v1/$cleaned"
+        return "$baseUrl/$cleaned"
     }
 
     companion object {
-        /** 见 [OpenAiCompatibleClient.baseUrl] 说明。 */
+        /**
+         * 把用户填写的地址规范成 API 根：`.../v1`。
+         *
+         * - `https://api.openai.com` / `https://api.openai.com/` → `https://api.openai.com/v1`
+         * - `https://api.openai.com/v1` / `https://api.openai.com/v1/` → `https://api.openai.com/v1`
+         * - `https://proxy.example.com/openai/v1/` → `https://proxy.example.com/openai/v1`
+         */
         internal fun normalizeBaseUrl(raw: String): String {
             var url = raw.trim().trimEnd('/')
-            // 用户常把 `/v1` 或 `/v1/` 一起填进来；只剥末尾这一段，保留中间的代理前缀
-            if (url.endsWith("/v1", ignoreCase = true)) {
-                url = url.dropLast(3).trimEnd('/')
+            if (!url.endsWith("/v1", ignoreCase = true)) {
+                url = "$url/v1"
             }
             return url
         }
