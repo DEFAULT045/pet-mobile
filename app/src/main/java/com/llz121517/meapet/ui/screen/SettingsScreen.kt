@@ -4,7 +4,18 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.foundation.border
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,16 +43,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -196,12 +206,15 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            val inactiveTrackColor = if (isSystemInDarkTheme()) Color(0xFF999999).copy(alpha = 0.3f)
+                                      else Color.White.copy(alpha = 0.35f)
             Slider(
                 value = state.temperature.toFloat(),
                 onValueChange = { settingsViewModel.updateTemperature(it.toDouble()) },
                 valueRange = 0f..2f,
                 steps = 19,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(inactiveTrackColor = inactiveTrackColor)
             )
 
             Spacer(Modifier.height(8.dp))
@@ -216,7 +229,8 @@ fun SettingsScreen(
                 onValueChange = { settingsViewModel.updateMaxTokens(it.toInt()) },
                 valueRange = 256f..8192f,
                 steps = 30,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(inactiveTrackColor = inactiveTrackColor)
             )
 
             Spacer(Modifier.height(16.dp))
@@ -273,16 +287,18 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
 
             // ── 动态颜色开关 ──
+            val dynamicColorSupported = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
             SettingsSwitchRow(
                 label = "使用系统动态颜色",
-                description = "关闭后可选择预设主题色",
-                checked = state.enableDynamicColor,
-                onCheckedChange = { settingsViewModel.updateEnableDynamicColor(it) }
+                description = if (dynamicColorSupported) "关闭后可选择预设主题色" else "当前系统不支持动态颜色",
+                checked = state.enableDynamicColor && dynamicColorSupported,
+                onCheckedChange = { if (dynamicColorSupported) settingsViewModel.updateEnableDynamicColor(it) },
+                enabled = dynamicColorSupported
             )
 
             // ── 颜色预设选择区（关闭动态颜色时展开） ──
             AnimatedVisibility(
-                visible = !state.enableDynamicColor,
+                visible = !(state.enableDynamicColor && dynamicColorSupported),
                 enter = expandVertically(),
                 exit = shrinkVertically()
             ) {
@@ -310,7 +326,8 @@ fun SettingsScreen(
                     Text("MeaPet —— 梅尔桌宠", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "一只基于 Live2D 的 AI 梅尔 非常不完善 但是初版花了我 0.14B Tokens",
+                        "一只基于 Live2D 的 AI 梅尔 非常不完善 但是初版花了我 0.14B Tokens\n" +
+                                "目前为止共消耗 0.268B Tokens",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -378,7 +395,8 @@ private fun SettingsSwitchRow(
     label: String,
     description: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
         modifier = Modifier
@@ -387,18 +405,33 @@ private fun SettingsSwitchRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+            )
             Text(
                 description,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            colors = androidx.compose.material3.SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.background,
+                uncheckedTrackColor = MaterialTheme.colorScheme.background,
+                uncheckedThumbColor = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.outline
+                                      else Color.White,
+            )
+        )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ThemeModeSelector(
     current: String,
@@ -406,33 +439,84 @@ private fun ThemeModeSelector(
 ) {
     val options = listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色")
     var expanded by remember { mutableStateOf(false) }
+    var showPopup by remember { mutableStateOf(false) }
+    var boxWidthPx by remember { mutableStateOf(0) }
+    var boxHeightPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded }
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            showPopup = true
+            animProgress.animateTo(1f, animationSpec = tween(200))
+        } else if (showPopup) {
+            animProgress.animateTo(0f, animationSpec = tween(200))
+            showPopup = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned {
+                boxWidthPx = it.size.width
+                boxHeightPx = it.size.height
+            }
     ) {
         OutlinedTextField(
             value = options.firstOrNull { it.first == current }?.second ?: "跟随系统",
             onValueChange = {},
             readOnly = true,
             label = { Text("主题模式") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            options.forEach { (value, label) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        onSelect(value)
-                        expanded = false
-                    }
+            trailingIcon = {
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.KeyboardArrowUp
+                                  else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null
                 )
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // 透明点击层——避免与 OutlinedTextField 的内部触摸处理冲突
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable { expanded = !expanded }
+        )
+
+        if (showPopup) {
+            val popupWidth = with(density) { boxWidthPx.toDp().coerceAtLeast(160.dp) }
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = IntOffset(x = 0, y = boxHeightPx + 4),
+                onDismissRequest = { expanded = false },
+                properties = PopupProperties(focusable = true)
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .width(popupWidth)
+                        .graphicsLayer {
+                            alpha = animProgress.value
+                            scaleX = 0.95f + 0.05f * animProgress.value
+                            scaleY = 0.95f + 0.05f * animProgress.value
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        },
+                    color = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(8.dp),
+                    tonalElevation = 2.dp,
+                    shadowElevation = 8.dp
+                ) {
+                    Column {
+                        options.forEach { (value, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = { onSelect(value); expanded = false }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -473,7 +557,7 @@ private fun ColorPresetSelector(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(preset.colorLight)
+                            .background(preset.seed)
                             .then(
                                 if (isSelected) Modifier.border(
                                     3.dp,

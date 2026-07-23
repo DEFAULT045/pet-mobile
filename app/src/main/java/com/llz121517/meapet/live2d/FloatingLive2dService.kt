@@ -105,14 +105,23 @@ class FloatingLive2dService : Service() {
         return START_STICKY
     }
 
+    /** 标记服务正在关闭，GL 线程应立刻停止工作。 */
+    @Volatile
+    private var shuttingDown = false
+
     override fun onDestroy() {
         wasActive = true
         overlayActive = false
-        // 先停 GL 线程再移除视图，防止渲染与 detach 竞态崩溃
+        shuttingDown = true
+        // 先停 GL 线程
         glSurfaceView.queueEvent { /* 标记 GL 线程停止 */ }
         glSurfaceView.onPause()
-        windowManager?.removeView(glSurfaceView)
-        windowManager = null
+        // 延迟移除视图——SurfaceView 可能有未完成的绘制回调，
+        // 立即 removeView 会导致 pending callback 中 getParent() 为 null → NPE
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try { windowManager?.removeView(glSurfaceView) } catch (_: Exception) {}
+            windowManager = null
+        }
         super.onDestroy()
     }
 
@@ -304,48 +313,55 @@ class FloatingLive2dService : Service() {
         }
 
         override fun onDrawFrame(unused: GL10?) {
-            if (!modelLoaded) {
-                loadModel()
-                modelLoaded = true
+            try {
+                // 服务正在关闭时不执行任何 GL 操作，防止竞态崩溃
+                if (service.shuttingDown) return
+
+                if (!modelLoaded) {
+                    loadModel()
+                    modelLoaded = true
+                    if (service.shuttingDown) return
+                }
+
+                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+
+                val m = model ?: return
+                if (winWidth <= 0 || winHeight <= 0) return
+
+                Live2dPal.updateTime()
+
+                val aspect = winWidth.toFloat() / winHeight.toFloat()
+                val displayRatio = winHeight.toFloat() / winWidth.toFloat()
+
+                CubismOffscreenManagerAndroid.getInstance().beginFrameProcess()
+                projection.loadIdentity()
+
+                val zoom = 1.4f
+                val canvasRatio = m.model!!.canvasHeight / m.model!!.canvasWidth
+                if (canvasRatio < displayRatio) {
+                    m.modelMatrix!!.setWidth(2.0f * zoom)
+                    projection.scale(1.0f, aspect)
+                    projection.translateRelative(0f, -0.35f)
+                } else {
+                    m.modelMatrix!!.setHeight(2.0f * zoom)
+                    projection.scale(1.0f / aspect, 1.0f)
+                    projection.translateRelative(0f, -0.35f)
+                }
+
+                viewMatrix.multiplyByMatrix(projection)
+                m.update()
+                m.draw(projection)
+
+                CubismOffscreenManagerAndroid.getInstance().endFrameProcess()
+                CubismOffscreenManagerAndroid.getInstance().releaseStaleRenderTextures()
+
+                if (!service.shuttingDown) {
+                    surface.requestRender()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Render error: ${e.message}")
             }
-
-            // Black background so the window border/shape is visible
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-
-            val m = model ?: return
-            if (winWidth <= 0 || winHeight <= 0) return
-
-            Live2dPal.updateTime()
-
-            val aspect = winWidth.toFloat() / winHeight.toFloat()
-            val displayRatio = winHeight.toFloat() / winWidth.toFloat()
-
-            CubismOffscreenManagerAndroid.getInstance().beginFrameProcess()
-            projection.loadIdentity()
-
-            // 放大后模型可能偏上，用 translate 下移居中
-            val zoom = 1.4f
-            val canvasRatio = m.model!!.canvasHeight / m.model!!.canvasWidth
-            if (canvasRatio < displayRatio) {
-                m.modelMatrix!!.setWidth(2.0f * zoom)
-                projection.scale(1.0f, aspect)
-                projection.translateRelative(0f, -0.35f)
-            } else {
-                m.modelMatrix!!.setHeight(2.0f * zoom)
-                projection.scale(1.0f / aspect, 1.0f)
-                projection.translateRelative(0f, -0.35f)
-            }
-
-            viewMatrix.multiplyByMatrix(projection)
-            m.update()
-            m.draw(projection)
-
-            CubismOffscreenManagerAndroid.getInstance().endFrameProcess()
-            CubismOffscreenManagerAndroid.getInstance().releaseStaleRenderTextures()
-
-            // Request next frame (WHEN_DIRTY mode)
-            surface.requestRender()
         }
 
         private fun loadModel() {
