@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.llz121517.meapet"
+    namespace = "com.meapet.mobile"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -13,7 +13,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.llz121517.meapet"
+        applicationId = "com.meapet.mobile"
         minSdk = 26
         versionCode = 3
         versionName = "1.0.2"

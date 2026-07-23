@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本控制](https://semver.org/spec/v2.0.0.html)。
 
+---
+
+## 2026-07-23
+
+### Refactor
+
+- **包名** — `com.llz121517.meapet` 改为 `com.meapet.mobile`。
+
+---
+
 ## [1.0.2] - 2026-07-23
 
 ### Fixed
@@ -31,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **关于部分** — 在设置页面的关于部分添加了累计Token消耗量显示
 
+---
+
 ## [1.0.1] - 2026-07-22
 
 ### Fixed
@@ -48,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - API 配置区提示文字："需要一个 OpenAI 兼容的 API 端点"。
 - 设置页关于介绍更新。
+
+---
 
 ## [1.0.0] - 2026-07-21
 
