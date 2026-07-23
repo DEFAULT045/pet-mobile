@@ -2,14 +2,19 @@ package com.meapet.mobile.settings
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -18,6 +23,10 @@ import kotlinx.coroutines.runBlocking
  * 基于 DataStore 的键值持久化，所有操作通过 Flow 暴露，
  * UI 层可响应式订阅变更。
  *
+ * 同步 getter 读取的是构造时在 IO 协程里预热、并持续跟随 DataStore 变更的
+ * 内存快照，正常路径不会产生磁盘 IO；仅在进程启动后的极短窗口内快照尚未
+ * 就绪时，才退化为一次 runBlocking 读盘兜底。
+ *
  * 该模块**不依赖**任何其他模块，可独立测试。
  *
  * @param context Application Context
@@ -25,6 +34,21 @@ import kotlinx.coroutines.runBlocking
 class SettingsManager(context: Context) {
 
     private val dataStore = context.appDataStore
+
+    /** 设置项内存快照（跟随 DataStore 变更；null = 尚未完成首次加载）。 */
+    @Volatile
+    private var cachedPrefs: Preferences? = null
+
+    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // 构造即预热：首次加载后持续订阅，保证快照与磁盘一致
+        cacheScope.launch {
+            dataStore.data.collect { prefs ->
+                cachedPrefs = prefs
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "SettingsManager"
@@ -107,72 +131,77 @@ class SettingsManager(context: Context) {
         prefs[KEY_FIRST_LAUNCH] ?: true
     }
 
-    // ── 同步 getter（非 Flow 场景使用，如 Client 构造） ──
+    // ── 同步 getter（非 Flow 场景使用，如 Client 构造）──
+    // 读取内存快照，正常路径无磁盘 IO；快照未就绪时短暂 runBlocking 读一次兜底
 
-    fun getApiKey(): String = runBlocking { dataStore.data.first()[KEY_API_KEY] ?: "" }
-    fun getApiUrl(): String = runBlocking { dataStore.data.first()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL }
-    fun getModel(): String = runBlocking { dataStore.data.first()[KEY_MODEL] ?: SettingsKeys.Defaults.MODEL }
-    fun getTemperature(): Double = runBlocking { dataStore.data.first()[KEY_TEMPERATURE] ?: SettingsKeys.Defaults.TEMPERATURE }
-    fun getMaxTokens(): Int = runBlocking { dataStore.data.first()[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS }
-    fun getSystemPrompt(): String = runBlocking { dataStore.data.first()[KEY_SYSTEM_PROMPT] ?: SettingsKeys.Defaults.SYSTEM_PROMPT }
-    fun isMemoryEnabled(): Boolean = runBlocking { dataStore.data.first()[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY }
-    fun isAutoSummaryEnabled(): Boolean = runBlocking { dataStore.data.first()[KEY_ENABLE_AUTO_SUMMARY] ?: SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY }
+    private fun currentPrefs(): Preferences =
+        cachedPrefs ?: runBlocking { dataStore.data.first() }.also { cachedPrefs = it }
+
+    fun getApiKey(): String = currentPrefs()[KEY_API_KEY] ?: ""
+    fun getApiUrl(): String = currentPrefs()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL
+    fun getModel(): String = currentPrefs()[KEY_MODEL] ?: SettingsKeys.Defaults.MODEL
+    fun getTemperature(): Double = currentPrefs()[KEY_TEMPERATURE] ?: SettingsKeys.Defaults.TEMPERATURE
+    fun getMaxTokens(): Int = currentPrefs()[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS
+    fun getSystemPrompt(): String = currentPrefs()[KEY_SYSTEM_PROMPT] ?: SettingsKeys.Defaults.SYSTEM_PROMPT
+    fun isMemoryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY
+    fun isAutoSummaryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_AUTO_SUMMARY] ?: SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY
 
     // ── 写入方法 ──────────────────────────────────────
+    // edit 返回写入后的最新快照，随手更新缓存，保证同步 getter 读己之写
 
     suspend fun setApiKey(key: String) {
-        dataStore.edit { prefs -> prefs[KEY_API_KEY] = key }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_API_KEY] = key }
         Log.d(TAG, "API Key updated")
     }
 
     suspend fun setApiUrl(url: String) {
-        dataStore.edit { prefs -> prefs[KEY_API_URL] = url }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_API_URL] = url }
         Log.d(TAG, "API URL updated: $url")
     }
 
     suspend fun setModel(model: String) {
-        dataStore.edit { prefs -> prefs[KEY_MODEL] = model }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_MODEL] = model }
     }
 
     suspend fun setTemperature(temp: Double) {
-        dataStore.edit { prefs -> prefs[KEY_TEMPERATURE] = temp }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_TEMPERATURE] = temp }
     }
 
     suspend fun setMaxTokens(tokens: Int) {
-        dataStore.edit { prefs -> prefs[KEY_MAX_TOKENS] = tokens }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_MAX_TOKENS] = tokens }
     }
 
     suspend fun setEnableMemory(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[KEY_ENABLE_MEMORY] = enabled }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_ENABLE_MEMORY] = enabled }
     }
 
     suspend fun setEnableAutoSummary(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[KEY_ENABLE_AUTO_SUMMARY] = enabled }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_ENABLE_AUTO_SUMMARY] = enabled }
     }
 
     suspend fun setSystemPrompt(prompt: String) {
-        dataStore.edit { prefs -> prefs[KEY_SYSTEM_PROMPT] = prompt }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_SYSTEM_PROMPT] = prompt }
     }
 
     suspend fun setThemeMode(mode: String) {
-        dataStore.edit { prefs -> prefs[KEY_THEME_MODE] = mode }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_THEME_MODE] = mode }
     }
 
     suspend fun setEnableDynamicColor(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[KEY_ENABLE_DYNAMIC_COLOR] = enabled }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_ENABLE_DYNAMIC_COLOR] = enabled }
     }
 
     suspend fun setColorPreset(preset: String) {
-        dataStore.edit { prefs -> prefs[KEY_COLOR_PRESET] = preset }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_COLOR_PRESET] = preset }
     }
 
     suspend fun markFirstLaunchDone() {
-        dataStore.edit { prefs -> prefs[KEY_FIRST_LAUNCH] = false }
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_FIRST_LAUNCH] = false }
     }
 
     /** 清除所有设置（恢复出厂）。 */
     suspend fun clearAll() {
-        dataStore.edit { it.clear() }
+        cachedPrefs = dataStore.edit { it.clear() }
         Log.i(TAG, "All settings cleared")
     }
 }

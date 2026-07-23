@@ -58,6 +58,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -89,16 +91,30 @@ fun SettingsScreen(
     val state by settingsViewModel.state.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
 
-    // ── 本地状态（保持光标位置） ──
+    // 深色与否跟随应用内主题设置（与页面整体配色取值一致），仅"跟随系统"时看系统
+    val darkTheme = when (state.themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> isSystemInDarkTheme()
+    }
+
+    // ── 本地编辑状态（进入页面时取一次已存值，失焦/离开页面时才写回） ──
     var localApiKey by remember { mutableStateOf(state.apiKey) }
     var localApiUrl by remember { mutableStateOf(state.apiUrl) }
     var localModel by remember { mutableStateOf(state.model) }
     var localSystemPrompt by remember { mutableStateOf(state.systemPrompt) }
+    var localTemperature by remember { mutableStateOf(state.temperature.toFloat()) }
+    var localMaxTokens by remember { mutableStateOf(state.maxTokens.toFloat()) }
 
-    LaunchedEffect(state.apiKey) { if (localApiKey != state.apiKey) localApiKey = state.apiKey }
-    LaunchedEffect(state.apiUrl) { if (localApiUrl != state.apiUrl) localApiUrl = state.apiUrl }
-    LaunchedEffect(state.model) { if (localModel != state.model) localModel = state.model }
-    LaunchedEffect(state.systemPrompt) { if (localSystemPrompt != state.systemPrompt) localSystemPrompt = state.systemPrompt }
+    // 离开页面时兜底保存（焦点还留在输入框内的场景）
+    DisposableEffect(Unit) {
+        onDispose {
+            settingsViewModel.saveApiKey(localApiKey)
+            settingsViewModel.saveApiUrl(localApiUrl)
+            settingsViewModel.saveModel(localModel)
+            settingsViewModel.saveSystemPrompt(localSystemPrompt)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -139,13 +155,12 @@ fun SettingsScreen(
 
             OutlinedTextField(
                 value = localApiKey,
-                onValueChange = {
-                    localApiKey = it
-                    settingsViewModel.updateApiKey(it)
-                },
+                onValueChange = { localApiKey = it },
                 label = { Text("API Key") },
                 placeholder = { Text("sk-...") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { if (!it.isFocused) settingsViewModel.saveApiKey(localApiKey) },
                 singleLine = true,
                 visualTransformation = if (apiKeyVisible)
                     VisualTransformation.None
@@ -170,12 +185,11 @@ fun SettingsScreen(
 
             OutlinedTextField(
                 value = localApiUrl,
-                onValueChange = {
-                    localApiUrl = it
-                    settingsViewModel.updateApiUrl(it)
-                },
+                onValueChange = { localApiUrl = it },
                 label = { Text("API 地址") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { if (!it.isFocused) settingsViewModel.saveApiUrl(localApiUrl) },
                 singleLine = true,
                 placeholder = { Text("https://api.openai.com") }
             )
@@ -189,12 +203,11 @@ fun SettingsScreen(
 
             OutlinedTextField(
                 value = localModel,
-                onValueChange = {
-                    localModel = it
-                    settingsViewModel.updateModel(it)
-                },
+                onValueChange = { localModel = it },
                 label = { Text("模型") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { if (!it.isFocused) settingsViewModel.saveModel(localModel) },
                 singleLine = true,
                 placeholder = { Text("gpt-4o-mini") }
             )
@@ -202,15 +215,18 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = "Temperature: ${"%.2f".format(state.temperature)}",
+                text = "Temperature: ${"%.2f".format(localTemperature)}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            val inactiveTrackColor = if (isSystemInDarkTheme()) Color(0xFF999999).copy(alpha = 0.3f)
+            val inactiveTrackColor = if (darkTheme) Color(0xFF999999).copy(alpha = 0.3f)
                                       else Color.White.copy(alpha = 0.35f)
             Slider(
-                value = state.temperature.toFloat(),
-                onValueChange = { settingsViewModel.updateTemperature(it.toDouble()) },
+                value = localTemperature,
+                onValueChange = { localTemperature = it },
+                onValueChangeFinished = {
+                    settingsViewModel.updateTemperature(localTemperature.toDouble())
+                },
                 valueRange = 0f..2f,
                 steps = 19,
                 modifier = Modifier.fillMaxWidth(),
@@ -220,13 +236,16 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = "最大 Token: ${state.maxTokens}",
+                text = "最大 Token: ${localMaxTokens.toInt()}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Slider(
-                value = state.maxTokens.toFloat(),
-                onValueChange = { settingsViewModel.updateMaxTokens(it.toInt()) },
+                value = localMaxTokens,
+                onValueChange = { localMaxTokens = it },
+                onValueChangeFinished = {
+                    settingsViewModel.updateMaxTokens(localMaxTokens.toInt())
+                },
                 valueRange = 256f..8192f,
                 steps = 30,
                 modifier = Modifier.fillMaxWidth(),
@@ -241,13 +260,13 @@ fun SettingsScreen(
             SectionTitle("System Prompt")
             OutlinedTextField(
                 value = localSystemPrompt,
-                onValueChange = {
-                    localSystemPrompt = it
-                    settingsViewModel.updateSystemPrompt(it)
-                },
+                onValueChange = { localSystemPrompt = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp),
+                    .height(120.dp)
+                    .onFocusChanged {
+                        if (!it.isFocused) settingsViewModel.saveSystemPrompt(localSystemPrompt)
+                    },
                 maxLines = 6
             )
 
@@ -262,12 +281,14 @@ fun SettingsScreen(
                 label = "启用记忆",
                 description = "保留对话中提取的重要信息",
                 checked = state.enableMemory,
+                darkTheme = darkTheme,
                 onCheckedChange = { settingsViewModel.updateEnableMemory(it) }
             )
             SettingsSwitchRow(
                 label = "自动摘要",
                 description = "定期总结对话为长期记忆",
                 checked = state.enableAutoSummary,
+                darkTheme = darkTheme,
                 onCheckedChange = { settingsViewModel.updateEnableAutoSummary(it) }
             )
 
@@ -292,6 +313,7 @@ fun SettingsScreen(
                 label = "使用系统动态颜色",
                 description = if (dynamicColorSupported) "关闭后可选择预设主题色" else "当前系统不支持动态颜色",
                 checked = state.enableDynamicColor && dynamicColorSupported,
+                darkTheme = darkTheme,
                 onCheckedChange = { if (dynamicColorSupported) settingsViewModel.updateEnableDynamicColor(it) },
                 enabled = dynamicColorSupported
             )
@@ -395,6 +417,7 @@ private fun SettingsSwitchRow(
     label: String,
     description: String,
     checked: Boolean,
+    darkTheme: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true
 ) {
@@ -425,7 +448,7 @@ private fun SettingsSwitchRow(
             colors = androidx.compose.material3.SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.background,
                 uncheckedTrackColor = MaterialTheme.colorScheme.background,
-                uncheckedThumbColor = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.outline
+                uncheckedThumbColor = if (darkTheme) MaterialTheme.colorScheme.outline
                                       else Color.White,
             )
         )

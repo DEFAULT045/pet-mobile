@@ -48,8 +48,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val container = MeaPetApplication.from(application)
     private val settingsManager: SettingsManager = container.settingsManager
 
-    private val _state = MutableStateFlow(SettingsUiState())
+    private val _state = MutableStateFlow(initialState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
+
+    /** 从内存快照同步读取初始值，保证首帧就是已存设置（供 UI 本地编辑状态取初值）。 */
+    private fun initialState(): SettingsUiState {
+        val key = settingsManager.getApiKey()
+        return SettingsUiState(
+            apiKey = key,
+            apiKeyMasked = maskApiKey(key),
+            apiUrl = settingsManager.getApiUrl(),
+            model = settingsManager.getModel(),
+            temperature = settingsManager.getTemperature(),
+            maxTokens = settingsManager.getMaxTokens(),
+            systemPrompt = settingsManager.getSystemPrompt(),
+            enableMemory = settingsManager.isMemoryEnabled(),
+            enableAutoSummary = settingsManager.isAutoSummaryEnabled()
+        )
+    }
 
     init {
         // 订阅所有设置流
@@ -123,22 +139,38 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     // ── 更新方法 ──────────────────────────────────────
 
-    fun updateApiKey(key: String) {
+    /** 保存 API Key（失焦/离开页面时调用）；值有变化才落盘并重建客户端。 */
+    fun saveApiKey(key: String) {
         viewModelScope.launch {
+            if (key == settingsManager.getApiKey()) return@launch
             settingsManager.setApiKey(key)
             container.reloadClient()
         }
     }
 
-    fun updateApiUrl(url: String) {
+    /** 保存 API URL（失焦/离开页面时调用）；值有变化才落盘并重建客户端。 */
+    fun saveApiUrl(url: String) {
         viewModelScope.launch {
+            if (url == settingsManager.getApiUrl()) return@launch
             settingsManager.setApiUrl(url)
             container.reloadClient()
         }
     }
 
-    fun updateModel(model: String) {
-        viewModelScope.launch { settingsManager.setModel(model) }
+    /** 保存模型名（失焦/离开页面时调用）；值有变化才落盘。 */
+    fun saveModel(model: String) {
+        viewModelScope.launch {
+            if (model == settingsManager.getModel()) return@launch
+            settingsManager.setModel(model)
+        }
+    }
+
+    /** 保存 System Prompt（失焦/离开页面时调用）；值有变化才落盘。 */
+    fun saveSystemPrompt(prompt: String) {
+        viewModelScope.launch {
+            if (prompt == settingsManager.getSystemPrompt()) return@launch
+            settingsManager.setSystemPrompt(prompt)
+        }
     }
 
     fun updateTemperature(temp: Double) {
@@ -147,10 +179,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun updateMaxTokens(tokens: Int) {
         viewModelScope.launch { settingsManager.setMaxTokens(tokens) }
-    }
-
-    fun updateSystemPrompt(prompt: String) {
-        viewModelScope.launch { settingsManager.setSystemPrompt(prompt) }
     }
 
     fun updateEnableMemory(enabled: Boolean) {

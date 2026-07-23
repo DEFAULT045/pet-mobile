@@ -32,7 +32,8 @@ class ConversationManager(
     fun addMessage(message: ChatMessage) {
         messages.add(message)
         trimWindow()
-        Log.d(TAG, "Message added [${message.role}]: ${message.content.take(50)}... (total: $size)")
+        // 只记角色与长度，对话内容不进 Logcat（隐私）
+        Log.d(TAG, "Message added [${message.role}] (${message.content.length} chars, total: $size)")
     }
 
     /** 批量添加。 */
@@ -102,6 +103,9 @@ class ConversationManager(
         messages.clear()
         Log.i(TAG, "Conversation cleared")
     }
+
+    /** 按 id 移除消息。@return 是否有消息被移除 */
+    fun removeMessage(id: String): Boolean = messages.removeAll { it.id == id }
 
     /** 获取最后一条非 system 消息。 */
     fun lastUserMessage(): ChatMessage? =

@@ -20,8 +20,9 @@ the MIT license of this project.
 
 - **Location in this repo:** `app/src/main/assets/com/live2d/`
 - **Copyright:** Copyright(c) Live2D Inc. All rights reserved.
-- **License:** [见下方说明]
+- **License:** Live2D Proprietary Software License Agreement
 - **License text:** `app/src/main/assets/com/live2d/LICENSE.md`
+- **URL:** https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html
 
 ---
 

@@ -2,19 +2,18 @@ package com.meapet.mobile.memory
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
-import java.util.UUID
 import kotlin.math.max
-import kotlin.math.min
 
 /**
  * 记忆存储器。
  *
  * ## 存储策略
  * - 主存储：内存 `MutableList`（高速读写）；
- * - 持久化：JSON 文件（应用退出不丢失）；
+ * - 持久化：JSON 文件（应用退出不丢失），写入采用临时文件 + rename 保证原子性；
  * - 淘汰策略：超过 [maxItems] 时淘汰 LRU + 低重要性条目。
  *
  * ## 低耦合
@@ -50,8 +49,8 @@ class MemoryRepository(
                 memories.add(item)
             }
             enforceCapacity()
+            persistLocked()
         }
-        persist()
         return item
     }
 
@@ -64,8 +63,8 @@ class MemoryRepository(
                 else memories.add(item)
             }
             enforceCapacity()
+            persistLocked()
         }
-        persist()
     }
 
     /** 根据 ID 查询。 */
@@ -86,14 +85,18 @@ class MemoryRepository(
 
     /** 删除指定记忆。 */
     suspend fun delete(id: String) {
-        mutex.withLock { memories.removeAll { it.id == id } }
-        persist()
+        mutex.withLock {
+            memories.removeAll { it.id == id }
+            persistLocked()
+        }
     }
 
     /** 清除所有记忆。 */
     suspend fun clear() {
-        mutex.withLock { memories.clear() }
-        persist()
+        mutex.withLock {
+            memories.clear()
+            persistLocked()
+        }
         Log.i(TAG, "All memories cleared")
     }
 
@@ -133,7 +136,7 @@ class MemoryRepository(
             item to score
         }
 
-        scored
+        val result = scored
             .filter { it.second > 0f }
             .sortedByDescending { it.second }
             .take(maxCount)
@@ -143,6 +146,9 @@ class MemoryRepository(
                     if (idx >= 0) memories[idx] = updated
                 }
             }
+        // 命中记忆的 accessCount/lastAccessedAt 已更新，落盘以免重启后 LRU 权重回退
+        if (result.isNotEmpty()) persistLocked()
+        result
     }
 
     /** 获取统计数据。 */
@@ -169,14 +175,19 @@ class MemoryRepository(
             val sorted = memories.sortedByDescending { it.importance * (it.accessCount.toFloat()) }
             memories.clear()
             memories.addAll(sorted.take(keepCount))
+            persistLocked()
         }
-        persist()
         Log.d(TAG, "Memory cache trimmed")
     }
 
     // ── 持久化 ────────────────────────────────────────
 
-    /** 从磁盘加载。应在初始化时调用。 */
+    /**
+     * 从磁盘加载。应在初始化时调用（异步，不阻塞主线程）。
+     *
+     * 加载前产生的新写入按 id 去重保留，磁盘数据排在前面；
+     * 文件损坏时备份为 `.corrupt` 并丢弃，不影响后续使用。
+     */
     suspend fun loadFromDisk() {
         mutex.withLock {
             if (!file.exists()) {
@@ -184,24 +195,50 @@ class MemoryRepository(
                 return
             }
             try {
-                val json = file.readText()
-                val items = parseJson(json)
-                memories.clear()
-                memories.addAll(items)
-                Log.i(TAG, "Loaded ${items.size} memories from disk")
+                val items = MemorySerialization.decode(file.readText())
+                val existingIds = memories.map { it.id }.toSet()
+                val loaded = items.filter { it.id !in existingIds }
+                memories.addAll(0, loaded)
+                enforceCapacity()
+                Log.i(TAG, "Loaded ${loaded.size} memories from disk")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load memories from disk", e)
+                Log.e(TAG, "Failed to load memories from disk, backing up corrupted file", e)
+                backupCorruptedFileLocked()
             }
         }
     }
 
-    private fun persist() {
+    /** 持久化当前列表。必须在持有 [mutex] 时调用，保证写入内容与内存状态一致。 */
+    private fun persistLocked() {
         try {
-            val json = toJson()
+            val json = MemorySerialization.encode(memories.toList())
             file.parentFile?.mkdirs()
-            file.writeText(json)
+            // 先写临时文件再 rename，避免写入中途崩溃导致文件截断
+            val tmp = File(context.filesDir, "$FILE_NAME.tmp")
+            tmp.writeText(json)
+            if (!tmp.renameTo(file)) {
+                file.delete()
+                if (!tmp.renameTo(file)) {
+                    Log.e(TAG, "Failed to replace memories file")
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to persist memories", e)
+        }
+    }
+
+    /** 将损坏的持久化文件挪到 `.corrupt` 备份，防止每次启动重复解析失败。 */
+    private fun backupCorruptedFileLocked() {
+        try {
+            val backup = File(context.filesDir, "$FILE_NAME.corrupt")
+            if (backup.exists()) backup.delete()
+            if (!file.renameTo(backup)) {
+                file.delete()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to back up corrupted memories file", e)
         }
     }
 
@@ -215,84 +252,4 @@ class MemoryRepository(
         memories.addAll(sorted.take(maxItems))
         Log.d(TAG, "Memory capacity enforced: ${memories.size}/$maxItems")
     }
-
-    // ── JSON 序列化（轻量，不引入 kotlinx.serialization 依赖） ──
-
-    private fun toJson(): String {
-        val sb = StringBuilder()
-        sb.appendLine("[")
-        memories.forEachIndexed { i, item ->
-            sb.appendLine("  {")
-            sb.appendLine("    \"id\": \"${escape(item.id)}\",")
-            sb.appendLine("    \"content\": \"${escape(item.content)}\",")
-            sb.appendLine("    \"type\": \"${item.type.name}\",")
-            sb.appendLine("    \"importance\": ${item.importance},")
-            sb.appendLine("    \"createdAt\": ${item.createdAt},")
-            sb.appendLine("    \"lastAccessedAt\": ${item.lastAccessedAt},")
-            sb.appendLine("    \"accessCount\": ${item.accessCount},")
-            sb.appendLine("    \"sourceMessageId\": ${item.sourceMessageId?.let { "\"${escape(it)}\"" } ?: null},")
-            sb.appendLine("    \"tags\": [${item.tags.joinToString(", ") { "\"${escape(it)}\"" }}]")
-            if (i < memories.size - 1) sb.appendLine("  },") else sb.appendLine("  }")
-        }
-        sb.appendLine("]")
-        return sb.toString()
-    }
-
-    private fun parseJson(json: String): List<MemoryItem> {
-        val items = mutableListOf<MemoryItem>()
-        // 简易 JSON 解析（无第三方依赖）
-        val itemBlocks = json.split(Regex("\\}\\s*,\\s*\\{"))
-        for (block in itemBlocks) {
-            try {
-                val clean = block.replace(Regex("[\\[\\]{}]"), "").trim()
-                if (clean.isBlank()) continue
-                val map = mutableMapOf<String, String>()
-                val regex = Regex("\"([^\"]+)\"\\s*:\\s*(\"[^\"]*\"|[0-9.]+|true|false|null|\\[.*?\\])")
-                regex.findAll(clean).forEach { match ->
-                    val key = match.groupValues[1]
-                    var value = match.groupValues[2]
-                    if (value.startsWith("\"") && value.endsWith("\"")) {
-                        value = value.substring(1, value.length - 1)
-                    }
-                    map[key] = value
-                }
-
-                if (map.containsKey("id") && map.containsKey("content")) {
-                    val tagsStr = map["tags"] ?: "[]"
-                    val tags = if (tagsStr.startsWith("[")) {
-                        Regex("\"([^\"]+)\"").findAll(tagsStr).map { it.groupValues[1] }.toList()
-                    } else emptyList()
-
-                    items.add(
-                        MemoryItem(
-                            id = map["id"] ?: UUID.randomUUID().toString(),
-                            content = unescape(map["content"] ?: ""),
-                            type = try { MemoryType.valueOf(map["type"] ?: "SHORT_TERM") } catch (_: Exception) { MemoryType.SHORT_TERM },
-                            importance = (map["importance"]?.toFloatOrNull() ?: 0.5f).coerceIn(0f, 1f),
-                            createdAt = map["createdAt"]?.toLongOrNull() ?: System.currentTimeMillis(),
-                            lastAccessedAt = map["lastAccessedAt"]?.toLongOrNull() ?: System.currentTimeMillis(),
-                            accessCount = map["accessCount"]?.toIntOrNull() ?: 1,
-                            sourceMessageId = map["sourceMessageId"]?.takeIf { it != "null" },
-                            tags = tags
-                        )
-                    )
-                }
-            } catch (_: Exception) { /* skip malformed entry */ }
-        }
-        return items
-    }
-
-    private fun escape(s: String): String = s
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-
-    private fun unescape(s: String): String = s
-        .replace("\\n", "\n")
-        .replace("\\r", "\r")
-        .replace("\\t", "\t")
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\")
 }

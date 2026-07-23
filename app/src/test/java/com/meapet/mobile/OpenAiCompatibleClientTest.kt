@@ -223,4 +223,51 @@ class OpenAiCompatibleClientTest {
         val result = client.createSpeech(body)
         assertContentEquals(audioBytes, result)
     }
+
+    @Test
+    fun baseUrlWithTrailingSlashIsNormalized() = runTest {
+        val fakeEngine = FakeHttpClientEngine { request ->
+            assertEquals("https://api.openai.com/v1/models", request.url)
+            HttpResponse(200, "{}".encodeToByteArray(), "application/json")
+        }
+
+        val client = OpenAiCompatibleClient(
+            apiKey = "sk-test",
+            baseUrl = "https://api.openai.com/",
+            engine = fakeEngine
+        )
+        client.listModels()
+    }
+
+    @Test
+    fun baseUrlAlreadyEndingWithV1IsNotDoubled() = runTest {
+        val fakeEngine = FakeHttpClientEngine { request ->
+            assertEquals("https://example.com/openai/v1/chat/completions", request.url)
+            HttpResponse(200, "{}".encodeToByteArray(), "application/json")
+        }
+
+        val client = OpenAiCompatibleClient(
+            apiKey = "sk-test",
+            baseUrl = "https://example.com/openai/v1/",
+            engine = fakeEngine
+        )
+        client.chatCompletion(
+            ApiRequest.chatCompletion(
+                model = "gpt-4o-mini",
+                messages = listOf(ApiRequest.textMessage("user", "hi"))
+            )
+        )
+    }
+
+    @Test
+    fun chatCompletionRequestBodyContainsMaxTokens() = runTest {
+        val body = ApiRequest.chatCompletion(
+            model = "gpt-4o-mini",
+            messages = listOf(ApiRequest.textMessage("user", "hi")),
+            temperature = 0.7,
+            maxTokens = 4096
+        )
+        val parsed = Json.parseToJsonElement(body).jsonObject
+        assertEquals(4096, parsed["max_tokens"]?.jsonPrimitive?.content?.toInt())
+    }
 }

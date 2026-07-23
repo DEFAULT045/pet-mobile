@@ -11,6 +11,7 @@ import com.meapet.mobile.chat.ChatUiState
 import com.meapet.mobile.framework.MeaPetApplication
 import com.meapet.mobile.live2d.Live2dManager
 import com.meapet.mobile.memory.MemoryManager
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +39,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+    /** 在途发送任务；清空会话时取消，避免回复回写到已清空的会话。 */
+    private var sendJob: Job? = null
 
     init {
         // 初始化时从 ConversationManager 加载已有消息
@@ -100,7 +104,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        viewModelScope.launch {
+        sendJob = viewModelScope.launch {
             val result = chatService.sendMessage(content)
             result.fold(
                 onSuccess = { (userMsg, assistantMsg) ->
@@ -138,7 +142,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        viewModelScope.launch {
+        sendJob = viewModelScope.launch {
             val result = chatService.retryLastMessage()
             result.fold(
                 onSuccess = { (userMsg, assistantMsg) ->
@@ -173,6 +177,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun clearConversation() {
+        // 取消在途发送，否则回复到达后会把消息回写进已清空的会话
+        sendJob?.cancel()
+        sendJob = null
         chatService.clearHistory()
         _state.update {
             ChatUiState(memoryContextInfo = "对话已清除")

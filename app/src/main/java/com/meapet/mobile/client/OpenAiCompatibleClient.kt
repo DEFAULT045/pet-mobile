@@ -12,14 +12,17 @@ import com.meapet.mobile.client.exception.ApiException
  * - 所有公开方法均为 `suspend`，原生协程支持。
  *
  * @param apiKey API 密钥
- * @param baseUrl 基础 URL，例如 `https://api.openai.com`
+ * @param baseUrl 基础 URL，例如 `https://api.openai.com`（尾部 `/` 或多余的 `/v1` 后缀会被自动规范化）
  * @param engine HTTP 引擎，单元测试可注入 Fake 实现
  */
 class OpenAiCompatibleClient(
     private val apiKey: String,
-    private val baseUrl: String,
+    baseUrl: String,
     private val engine: HttpClientEngine = KtorHttpClientEngine()
 ) {
+
+    /** 规范化后的基础 URL：去掉尾部 `/`；若用户填的地址已带 `/v1` 后缀则剥掉，避免重复拼接。 */
+    private val baseUrl: String = baseUrl.trimEnd('/').removeSuffix("/v1").trimEnd('/')
 
     /** `GET /v1/models` */
     suspend fun listModels(): String {

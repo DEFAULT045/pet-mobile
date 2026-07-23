@@ -14,6 +14,7 @@ import com.meapet.mobile.settings.SettingsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * 应用依赖容器（手动 DI / 服务定位器）。
@@ -52,10 +53,11 @@ class AppContainer(
         SettingsManager(context)
     }
 
-    /** OpenAI 兼容 HTTP 客户端。 */
-    val apiClient: OpenAiCompatibleClient by lazy {
-        createClient()
-    }
+    /** OpenAI 兼容 HTTP 客户端。可通过 [reloadClient] 在运行时重建。 */
+    val apiClient: OpenAiCompatibleClient
+        get() = _apiClient ?: synchronized(clientLock) {
+            _apiClient ?: createClient().also { _apiClient = it }
+        }
 
     /** 会话历史管理器。 */
     val conversationManager: ConversationManager by lazy {
@@ -71,7 +73,7 @@ class AppContainer(
     val memoryService: MemoryService by lazy {
         MemoryService(
             repository = memoryRepository,
-            summarizationClient = apiClient,
+            summarizationClient = { apiClient },
             settingsManager = settingsManager,
             config = config
         )
@@ -81,17 +83,19 @@ class AppContainer(
     val memoryManager: MemoryManager by lazy {
         MemoryManager(
             service = memoryService,
-            repository = memoryRepository
+            repository = memoryRepository,
+            settingsManager = settingsManager
         )
     }
 
     /** 聊天服务（核心业务逻辑）。 */
     val chatService: ChatService by lazy {
         ChatService(
-            client = apiClient,
+            clientProvider = { apiClient },
             conversationManager = conversationManager,
             memoryManager = memoryManager,
             settingsManager = settingsManager,
+            postProcessScope = applicationScope,
             config = config
         )
     }
@@ -114,18 +118,31 @@ class AppContainer(
         )
     }
 
+    // ── 启动预热 ──────────────────────────────────────
+
+    /** 启动时异步加载持久化的记忆数据（不阻塞主线程）。 */
+    fun warmUp() {
+        applicationScope.launch(Dispatchers.IO) {
+            memoryRepository.loadFromDisk()
+        }
+    }
+
     // ── 运行时热替换 ──────────────────────────────────
 
     /**
      * 在 API Key 或 Base URL 变更后重建 HTTP 客户端。
-     * 各服务会在下次请求时通过新的 [apiClient] 发送。
+     *
+     * 旧客户端引擎会被关闭；[ChatService]、[MemoryService] 通过 provider
+     * 在下次请求时拿到新的 [apiClient]，无需重建服务实例。
      */
     fun reloadClient() {
-        // 手动 DI 的局限：需要重建持有 client 的服务
-        // 这里通过重新创建各服务实例来处理
-        _apiClient?.close()
-        _apiClient = null
-        _chatService = null
+        val old: OpenAiCompatibleClient?
+        synchronized(clientLock) {
+            old = _apiClient
+            _apiClient = null
+        }
+        old?.close()
+        Log.i(TAG, "API client invalidated, will be rebuilt on next request")
     }
 
     /**
@@ -145,11 +162,10 @@ class AppContainer(
 
     // ── 内部可变缓存（用于 reload） ──
 
-    @Volatile
-    private var _apiClient: OpenAiCompatibleClient? = null
+    private val clientLock = Any()
 
     @Volatile
-    private var _chatService: ChatService? = null
+    private var _apiClient: OpenAiCompatibleClient? = null
 
     private fun createClient(): OpenAiCompatibleClient {
         val apiKey = settingsManager.getApiKey()
