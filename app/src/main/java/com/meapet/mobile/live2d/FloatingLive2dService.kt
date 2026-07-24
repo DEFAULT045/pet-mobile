@@ -11,6 +11,7 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -18,7 +19,6 @@ import android.view.WindowManager
 import com.live2d.sdk.cubism.framework.CubismFramework
 import com.live2d.sdk.cubism.framework.math.CubismMatrix44
 import com.live2d.sdk.cubism.framework.rendering.android.CubismOffscreenManagerAndroid
-import com.live2d.sdk.cubism.framework.rendering.android.CubismRendererAndroid
 import com.live2d.sdk.cubism.framework.rendering.android.CubismShaderAndroid
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -28,7 +28,7 @@ import kotlin.math.sqrt
  * Foreground service that renders the Live2D model in a transparent floating window.
  * - Drag to move
  * - Pinch to resize
- * - Tap to close
+ * - Double-tap to close
  */
 class FloatingLive2dService : Service() {
 
@@ -37,6 +37,9 @@ class FloatingLive2dService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "live2d_overlay"
 
+        /** 判定为轻触（而非拖动）的最大位移，单位 dp。 */
+        private const val TAP_SLOP_DP = 24f
+
         /** Whether the overlay is currently active. */
         @Volatile
         var overlayActive = false
@@ -44,6 +47,17 @@ class FloatingLive2dService : Service() {
         /** Whether the overlay was active; checked to reset GL state after close. */
         @Volatile
         var wasActive = false
+
+        /** Service 是否存活（onCreate → onDestroy 之间）。与 [overlayActive] 不同，
+         *  本标记只由 Service 自身在主线程读写，是判断"Service 还在用共享单例"的可靠依据。 */
+        @Volatile
+        var isRunning = false
+            private set
+
+        /** MainActivity 销毁时因 Service 仍在运行而跳过了共享单例的全局 dispose，
+         *  置位此标记，由 Service onDestroy 收尾。两个 onDestroy 都在主线程回调，无并发。 */
+        @Volatile
+        var pendingSharedDispose = false
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, FloatingLive2dService::class.java))
@@ -56,6 +70,7 @@ class FloatingLive2dService : Service() {
 
     private var windowManager: WindowManager? = null
     private lateinit var glSurfaceView: GLSurfaceView
+    private var renderer: FloatingRenderer? = null
     private var layoutParams: WindowManager.LayoutParams? = null
 
     // ----- touch state -----
@@ -81,28 +96,36 @@ class FloatingLive2dService : Service() {
     private val maxWinPx: Int get() = (600 * density).toInt()
     private val baseAspect: Float get() = 150f / 218f  // width / height
 
-    // ----- offset to convert getX → rawX (works on all API levels) -----
-    private var rawOffsetX = 0
-    private var rawOffsetY = 0
-
     override fun onCreate() {
         super.onCreate()
         wasActive = false
         overlayActive = true
+        isRunning = true
+        // 提供 application context，Activity 已销毁时悬浮窗仍能加载模型资源
+        Live2dDelegate.getInstance().attachContext(applicationContext)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
+        // 无悬浮窗权限时（如权限被用户在后台撤销后服务被重启）直接退出，
+        // 否则会留下一个加不上视图/吞触摸的空壳服务
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Overlay permission missing, stopping service")
+            overlayActive = false
+            stopSelf()
+            return
+        }
         createFloatingWindow()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     /**
-     * 返回 [START_STICKY] 确保进程被系统杀死后自动重启，
-     * 与服务关联的 Activity 也能随之恢复。
+     * 返回 [START_NOT_STICKY]：进程被系统杀死后 CubismFramework 未 startUp、
+     * Live2dDelegate 也没有 Activity，自动重启只会得到一个模型加载失败、
+     * 只吞触摸的隐形窗口，因此不做自动重启，由用户手动重新打开。
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand: flags=$flags startId=$startId")
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     /** 标记服务正在关闭，GL 线程应立刻停止工作。 */
@@ -110,17 +133,31 @@ class FloatingLive2dService : Service() {
     private var shuttingDown = false
 
     override fun onDestroy() {
-        wasActive = true
+        isRunning = false
         overlayActive = false
         shuttingDown = true
-        // 先停 GL 线程
-        glSurfaceView.queueEvent { /* 标记 GL 线程停止 */ }
-        glSurfaceView.onPause()
-        // 延迟移除视图——SurfaceView 可能有未完成的绘制回调，
-        // 立即 removeView 会导致 pending callback 中 getParent() 为 null → NPE
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            try { windowManager?.removeView(glSurfaceView) } catch (_: Exception) {}
-            windowManager = null
+        if (::glSurfaceView.isInitialized) {
+            // 先在 GL 线程释放模型的 native 资源。事件在 onPause 之前入队：
+            // GLSurfaceView 的 GL 线程按序处理事件队列且优先于暂停处理，
+            // 因此 releaseModel 执行时 EGL 上下文仍然有效
+            glSurfaceView.queueEvent { renderer?.releaseModel() }
+            // onPause 会阻塞到 GL 线程完成当前帧并暂停，此后本服务不再发出任何 GL 调用
+            glSurfaceView.onPause()
+            // 延迟移除视图——SurfaceView 可能有未完成的绘制回调，
+            // 立即 removeView 会导致 pending callback 中 getParent() 为 null → NPE
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try { windowManager?.removeView(glSurfaceView) } catch (_: Exception) {}
+                windowManager = null
+            }
+        }
+        // 必须在 GL 线程静止（上面的 onPause 返回）之后再置位 wasActive：
+        // MainActivity 的 GL 线程看到 wasActive 才会 deleteInstance 重建 shader 单例，
+        // 这个顺序保证两条 GL 线程不会并发操作 CubismShaderAndroid
+        wasActive = true
+        // MainActivity 已销毁且把共享单例的收尾托付给了本服务
+        if (pendingSharedDispose) {
+            pendingSharedDispose = false
+            try { Live2dDelegate.getInstance().onDestroy() } catch (_: Exception) {}
         }
         super.onDestroy()
     }
@@ -143,7 +180,7 @@ class FloatingLive2dService : Service() {
         }
         return builder
             .setContentTitle("Live2D Overlay")
-            .setContentText("Drag to move · Pinch to resize · Tap to close")
+            .setContentText("Drag to move · Pinch to resize · Double-tap to close")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .build()
@@ -156,6 +193,9 @@ class FloatingLive2dService : Service() {
         val winWidth = (150 * density).toInt()
         val winHeight = (218 * density).toInt()
 
+        val floatingRenderer = FloatingRenderer(this)
+        renderer = floatingRenderer
+
         glSurfaceView = object : GLSurfaceView(this) {
             override fun onTouchEvent(event: MotionEvent): Boolean {
                 handleTouch(event)
@@ -167,9 +207,9 @@ class FloatingLive2dService : Service() {
             setEGLConfigChooser(8, 8, 8, 8, 16, 0)
             setZOrderOnTop(true)
             setEGLContextClientVersion(2)
-            setRenderer(FloatingRenderer(this@FloatingLive2dService, this@apply))
-            // WHEN_DIRTY reduces GPU load — requestRender() called per frame
-            renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+            setRenderer(floatingRenderer)
+            // 模型有常驻待机动画，每帧都要重绘，如实使用连续渲染模式
+            renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
             setPreserveEGLContextOnPause(false)
         }
 
@@ -205,8 +245,6 @@ class FloatingLive2dService : Service() {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 // First finger down → prepare for drag or tap
-                rawOffsetX = (event.rawX - event.x).toInt()
-                rawOffsetY = (event.rawY - event.y).toInt()
                 dragStartX = params.x
                 dragStartY = params.y
                 dragStartRawX = event.rawX
@@ -237,25 +275,44 @@ class FloatingLive2dService : Service() {
                     windowManager?.updateViewLayout(glSurfaceView, params)
                 } else {
                     // --- DRAG: move window ---
-                    params.x = dragStartX + (event.rawX - dragStartRawX).toInt()
-                    params.y = dragStartY + (event.rawY - dragStartRawY).toInt()
+                    // 钳制在屏幕范围内（留出窗口自身尺寸），防止拖出屏幕后找不回
+                    val dm = resources.displayMetrics
+                    params.x = (dragStartX + (event.rawX - dragStartRawX).toInt())
+                        .coerceIn(0, (dm.widthPixels - params.width).coerceAtLeast(0))
+                    params.y = (dragStartY + (event.rawY - dragStartRawY).toInt())
+                        .coerceIn(0, (dm.heightPixels - params.height).coerceAtLeast(0))
                     windowManager?.updateViewLayout(glSurfaceView, params)
                 }
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
-                // 双击关闭（500ms 内两次点击）
-                if (event.pointerCount <= 1) {
+            MotionEvent.ACTION_POINTER_UP -> {
+                // 捏合结束（两指 → 一指）：把拖动锚点重置到剩余手指的当前位置，
+                // 否则下一个 MOVE 会按 ACTION_DOWN 时的旧锚点计算，窗口猛跳
+                if (event.pointerCount == 2) {
                     pinchStartDist = 0f
-                    val dx = event.rawX - dragStartRawX
-                    val dy = event.rawY - dragStartRawY
-                    if (sqrt((dx * dx + dy * dy).toDouble()) < 15.0) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastTapTime < 500L) {
-                            stopSelf()  // 双击关闭
-                        }
-                        lastTapTime = now
+                    // rawX/rawY 只对 pointer 0 提供，用「raw − 视图内坐标」求出
+                    // 窗口到屏幕的偏移，再换算出剩余手指的屏幕坐标
+                    val offX = event.rawX - event.getX(0)
+                    val offY = event.rawY - event.getY(0)
+                    val remaining = if (event.actionIndex == 0) 1 else 0
+                    dragStartX = params.x
+                    dragStartY = params.y
+                    dragStartRawX = event.getX(remaining) + offX
+                    dragStartRawY = event.getY(remaining) + offY
+                }
+            }
+
+            MotionEvent.ACTION_UP -> {
+                // 双击关闭（500ms 内两次轻触）
+                pinchStartDist = 0f
+                val dx = event.rawX - dragStartRawX
+                val dy = event.rawY - dragStartRawY
+                if (sqrt((dx * dx + dy * dy).toDouble()) < TAP_SLOP_DP * density) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastTapTime < 500L) {
+                        stopSelf()  // 双击关闭
                     }
+                    lastTapTime = now
                 }
             }
         }
@@ -271,8 +328,7 @@ class FloatingLive2dService : Service() {
     // ================ Renderer ================
 
     private class FloatingRenderer(
-        private val service: FloatingLive2dService,
-        private val surface: GLSurfaceView
+        private val service: FloatingLive2dService
     ) : GLSurfaceView.Renderer {
 
         private var model: Live2dModel? = null
@@ -282,6 +338,17 @@ class FloatingLive2dService : Service() {
         private var winWidth = 0
         private var winHeight = 0
         private var modelLoaded = false
+
+        /**
+         * 释放模型持有的 native 内存（moc/model）与 renderer。
+         * 必须在 GL 线程调用（经 GLSurfaceView.queueEvent），且需在 onPause
+         * 释放 EGL 上下文之前入队，保证 renderer 的 GL 删除操作仍有有效上下文。
+         */
+        fun releaseModel() {
+            model?.deleteModel()
+            model = null
+            modelLoaded = false
+        }
 
         override fun onSurfaceCreated(unused: GL10?, config: EGLConfig?) {
             Log.d(TAG, "Overlay onSurfaceCreated")
@@ -301,8 +368,9 @@ class FloatingLive2dService : Service() {
             }
 
             textureManager = Live2dTextureManager()
-            modelLoaded = false
-            model = null
+            // surface 重建时旧 GL 上下文已销毁（GL 资源随之释放），
+            // 但 moc/model 的 native 内存仍需显式释放后再重新加载
+            releaseModel()
         }
 
         override fun onSurfaceChanged(unused: GL10?, width: Int, height: Int) {
@@ -355,10 +423,6 @@ class FloatingLive2dService : Service() {
 
                 CubismOffscreenManagerAndroid.getInstance().endFrameProcess()
                 CubismOffscreenManagerAndroid.getInstance().releaseStaleRenderTextures()
-
-                if (!service.shuttingDown) {
-                    surface.requestRender()
-                }
             } catch (e: Exception) {
                 Log.e(TAG, "Render error: ${e.message}")
             }
@@ -374,6 +438,12 @@ class FloatingLive2dService : Service() {
                 Log.d(TAG, "Overlay model loaded successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load overlay model", e)
+                // 释放可能已部分构建的模型，并停掉服务——
+                // 留着空窗口只会吞触摸且无法关闭
+                releaseModel()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    service.stopSelf()
+                }
             }
         }
     }

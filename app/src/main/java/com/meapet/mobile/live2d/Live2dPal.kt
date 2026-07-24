@@ -31,8 +31,11 @@ object Live2dPal {
 
     fun loadFileAsBytes(path: String): ByteArray {
         return try {
-            val act = Live2dDelegate.getInstance().activity ?: return ByteArray(0)
-            val stream = act.assets.open(path)
+            // 用 application context（不随 Activity 销毁失效），Activity 不可用时回退
+            val ctx = Live2dDelegate.getInstance().appContext
+                ?: Live2dDelegate.getInstance().activity
+                ?: return ByteArray(0)
+            val stream = ctx.assets.open(path)
             stream.use { s ->
                 val buffer = ByteArray(s.available())
                 s.read(buffer)

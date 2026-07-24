@@ -21,7 +21,7 @@ object SettingsKeys {
 
     /** 合理的默认值。 */
     object Defaults {
-        const val API_URL = "https://api.openai.com"
+        const val API_URL = "https://api.openai.com/v1"
         const val MODEL = "gpt-4o-mini"
         const val TEMPERATURE = 0.7
         const val MAX_TOKENS = 4096

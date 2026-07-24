@@ -2,8 +2,11 @@ package com.meapet.mobile.memory
 
 import android.util.Log
 import com.meapet.mobile.client.OpenAiCompatibleClient
+import com.meapet.mobile.client.model.ApiRequest
+import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.framework.AppConfig
 import com.meapet.mobile.settings.SettingsManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -26,13 +29,14 @@ import java.util.UUID
  * - 调用方（如 ChatService）决定何时触发记忆提取。
  *
  * @param repository 记忆存储器
- * @param summarizationClient 用于 AI 总结的 HTTP 客户端（null = 降级）
+ * @param summarizationClient 提供 AI 总结用 HTTP 客户端的 provider（每次调用重新获取，
+ *   以便配置变更重建客户端后立即生效；返回 null = 降级）
  * @param settingsManager 设置管理器
  * @param config 应用配置
  */
 class MemoryService(
     private val repository: MemoryRepository,
-    private val summarizationClient: OpenAiCompatibleClient?,
+    private val summarizationClient: () -> OpenAiCompatibleClient?,
     private val settingsManager: SettingsManager,
     private val config: AppConfig = AppConfig.DEFAULT
 ) {
@@ -94,7 +98,10 @@ class MemoryService(
     suspend fun summarizeToLongTerm(
         recentMessages: List<Pair<String, String>>
     ): MemoryItem? {
-        if (!settingsManager.isAutoSummaryEnabled() || summarizationClient == null) return null
+        // 记忆总开关优先于自动摘要子开关：关记忆时对话不得外发给摘要模型
+        if (!settingsManager.isMemoryEnabled()) return null
+        if (!settingsManager.isAutoSummaryEnabled()) return null
+        val client = summarizationClient() ?: return null
         if (recentMessages.size < 3) return null  // 对话太短不摘要
 
         return withContext(Dispatchers.IO) {
@@ -111,20 +118,22 @@ class MemoryService(
                     appendLine(conversationText)
                 }
 
-                val requestBody = """{
-                    "model": "${config.memorySummaryModel ?: settingsManager.getModel()}",
-                    "messages": [
-                        {"role": "system", "content": "你是一个记忆提取助手。请从对话中提取需要长期记住的关键信息，输出简洁的一句话摘要。"},
-                        {"role": "user", "content": ${jsonEncode(prompt)}}
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 200
-                }"""
+                val requestBody = ApiRequest.chatCompletion(
+                    model = config.memorySummaryModel ?: settingsManager.getModel(),
+                    messages = listOf(
+                        ApiRequest.textMessage(
+                            "system",
+                            "你是一个记忆提取助手。请从对话中提取需要长期记住的关键信息，输出简洁的一句话摘要。"
+                        ),
+                        ApiRequest.textMessage("user", prompt)
+                    ),
+                    temperature = 0.3,
+                    maxTokens = 200
+                )
 
-                val response = summarizationClient.chatCompletion(requestBody)
+                val response = client.chatCompletion(requestBody)
 
-                // 简单解析 response 提取 content（完整 JSON 解析在 ChatService 中进行）
-                val summary = extractContentFromResponse(response) ?: return@withContext null
+                val summary = ApiResponse.chatCompletionContent(response) ?: return@withContext null
                 if (summary.length < 10) return@withContext null
 
                 val item = MemoryItem(
@@ -136,8 +145,10 @@ class MemoryService(
                 )
 
                 repository.save(item)
-                Log.i(TAG, "Long-term memory created: ${summary.take(80)}...")
+                Log.i(TAG, "Long-term memory created (${summary.length} chars)")
                 item
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to summarize conversation", e)
                 null
@@ -235,18 +246,4 @@ class MemoryService(
         val long = if (a.length > b.length) a else b
         return short.length > 10 && long.contains(short.take(30))
     }
-
-    private fun extractContentFromResponse(json: String): String? {
-        // 简易 JSON 解析：查找 "content":"..." 或 "content": "..."
-        val regex = Regex("\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
-        val match = regex.find(json)
-        return match?.groupValues?.getOrNull(1)?.replace("\\n", "\n")?.replace("\\\"", "\"")
-    }
-
-    private fun jsonEncode(s: String): String = s
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
 }

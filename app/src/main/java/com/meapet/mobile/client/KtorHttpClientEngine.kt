@@ -3,6 +3,7 @@ package com.meapet.mobile.client
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -22,6 +23,12 @@ class KtorHttpClientEngine : HttpClientEngine {
 
     private val client = HttpClient(CIO) {
         expectSuccess = false
+        install(HttpTimeout) {
+            // LLM 非流式长回复场景：整体与 socket 超时放宽到 5 分钟，连接仍 30 秒快速失败
+            requestTimeoutMillis = 300_000
+            connectTimeoutMillis = 30_000
+            socketTimeoutMillis = 300_000
+        }
     }
 
     override suspend fun execute(request: HttpRequest): HttpResponse {

@@ -1,17 +1,18 @@
 # MeaPet —— 梅尔桌宠
 
-**一只基于 Live2D 的 AI 桌宠**
+Android 上的 Live2D AI 桌宠：在主页与系统悬浮窗里渲染 Live2D 模型，接入 OpenAI 兼容 API 做多轮聊天，并带本地记忆与 Material You 主题。
 
-本项目由 [suan-11/mea-pet-public](https://github.com/suan-11/mea-pet-public) 衍生
+本项目由 [suan-11/mea-pet-public](https://github.com/suan-11/mea-pet-public) 衍生。
 
 ---
 
 ## 功能
 
-- **Live2D 模型** — 基于 Live2D Cubism SDK 的主页模型展示，支持触摸交互与视角跟随
-- **AI 聊天** — OpenAI 兼容 API 客户端，支持多轮对话、System Prompt 与记忆上下文注入
-- **多主题配色** — Material You 动态取色 + 12 套预设色板（紫罗兰、海洋、森林、日落、玫瑰……），支持浅色/深色模式
-- **悬浮窗模式** — 前台 Service 浮窗运行，支持拖拽、捏合缩放、双击关闭
+- **Live2D 模型** — Cubism SDK 渲染，支持触摸交互、视角跟随与分区语音反馈
+- **AI 聊天** — OpenAI 兼容 API（可自建中转），多轮对话、System Prompt、记忆上下文注入
+- **本地记忆** — 短期提取 + 定期长期摘要，持久化到本机，可在设置中开关
+- **多主题配色** — Material You 动态取色 + 多套预设色板，支持浅色 / 深色 / 跟随系统
+- **悬浮窗模式** — 前台 Service 浮窗常驻，支持拖拽、捏合缩放、双击关闭
 
 ## 开始使用
 
@@ -28,7 +29,7 @@
 
 #### 方式一：下载发行版（推荐）
 
-从 [Releases](https://github.com/llz121517/MeaPet/releases) 页面下载最新的 APK 直接安装，无需自行编译。
+从 [Releases](https://github.com/llz121517/mea-pet-mobile/releases) 页面下载最新的 APK 直接安装，无需自行编译。
 
 ```bash
 adb install MeaPet-v1.0.2.apk
@@ -54,8 +55,8 @@ MeaPet/
 **2. 编译 APK**
 
 ```bash
-git clone https://github.com/llz121517/MeaPet.git
-cd MeaPet
+git clone https://github.com/llz121517/mea-pet-mobile.git
+cd mea-pet-mobile
 ./gradlew assembleDebug
 ```
 

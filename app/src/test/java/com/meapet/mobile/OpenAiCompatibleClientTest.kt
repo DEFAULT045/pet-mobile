@@ -223,4 +223,95 @@ class OpenAiCompatibleClientTest {
         val result = client.createSpeech(body)
         assertContentEquals(audioBytes, result)
     }
+
+    @Test
+    fun baseUrlWithTrailingSlashIsNormalized() = runTest {
+        val fakeEngine = FakeHttpClientEngine { request ->
+            assertEquals("https://api.openai.com/v1/models", request.url)
+            HttpResponse(200, "{}".encodeToByteArray(), "application/json")
+        }
+
+        val client = OpenAiCompatibleClient(
+            apiKey = "sk-test",
+            baseUrl = "https://api.openai.com/v1/",
+            engine = fakeEngine
+        )
+        client.listModels()
+    }
+
+    @Test
+    fun baseUrlMissingV1GetsItAppendedThenPath() = runTest {
+        // 用户只填主机时，也自动补 /v1 再拼后续
+        val fakeEngine = FakeHttpClientEngine { request ->
+            assertEquals("https://api.openai.com/v1/chat/completions", request.url)
+            HttpResponse(200, "{}".encodeToByteArray(), "application/json")
+        }
+        OpenAiCompatibleClient(
+            apiKey = "sk-test",
+            baseUrl = "https://api.openai.com",
+            engine = fakeEngine
+        ).chatCompletion(
+            ApiRequest.chatCompletion(
+                model = "gpt-4o-mini",
+                messages = listOf(ApiRequest.textMessage("user", "hi"))
+            )
+        )
+    }
+
+    @Test
+    fun baseUrlWithV1OnlyAppendsEndpoint() = runTest {
+        // 用户填 https://.../v1 ，后面只补请求路径
+        val cases = listOf(
+            "https://api.openai.com/v1" to "https://api.openai.com/v1/models",
+            "https://api.openai.com/v1/" to "https://api.openai.com/v1/models",
+            "https://example.com/openai/v1" to "https://example.com/openai/v1/models",
+            "https://example.com/openai/v1/" to "https://example.com/openai/v1/models",
+            "https://proxy.example.com" to "https://proxy.example.com/v1/models",
+            "https://proxy.example.com/" to "https://proxy.example.com/v1/models"
+        )
+        for ((input, expected) in cases) {
+            val fakeEngine = FakeHttpClientEngine { request ->
+                assertEquals(expected, request.url, "baseUrl=$input")
+                HttpResponse(200, "{}".encodeToByteArray(), "application/json")
+            }
+            OpenAiCompatibleClient(
+                apiKey = "sk-test",
+                baseUrl = input,
+                engine = fakeEngine
+            ).listModels()
+        }
+    }
+
+    @Test
+    fun normalizeBaseUrlEnsuresTrailingV1() {
+        assertEquals(
+            "https://api.openai.com/v1",
+            OpenAiCompatibleClient.normalizeBaseUrl("https://api.openai.com/v1/")
+        )
+        assertEquals(
+            "https://api.openai.com/v1",
+            OpenAiCompatibleClient.normalizeBaseUrl("https://api.openai.com")
+        )
+        assertEquals(
+            "https://gateway.example.com/openai/v1",
+            OpenAiCompatibleClient.normalizeBaseUrl("https://gateway.example.com/openai/v1")
+        )
+        // 中间的 /v1 路径段保留，并在末尾再保证 /v1
+        assertEquals(
+            "https://gateway.example.com/v1/proxy/v1",
+            OpenAiCompatibleClient.normalizeBaseUrl("https://gateway.example.com/v1/proxy/")
+        )
+    }
+
+    @Test
+    fun chatCompletionRequestBodyContainsMaxTokens() = runTest {
+        val body = ApiRequest.chatCompletion(
+            model = "gpt-4o-mini",
+            messages = listOf(ApiRequest.textMessage("user", "hi")),
+            temperature = 0.7,
+            maxTokens = 4096
+        )
+        val parsed = Json.parseToJsonElement(body).jsonObject
+        assertEquals(4096, parsed["max_tokens"]?.jsonPrimitive?.content?.toInt())
+    }
 }

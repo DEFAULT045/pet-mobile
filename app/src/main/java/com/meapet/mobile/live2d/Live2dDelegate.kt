@@ -1,6 +1,7 @@
 package com.meapet.mobile.live2d
 
 import android.app.Activity
+import android.content.Context
 import android.opengl.GLES20
 import android.util.Log
 import com.live2d.sdk.cubism.framework.CubismFramework
@@ -31,6 +32,11 @@ class Live2dDelegate private constructor() {
     val activity: Activity? get() = _activity
     // 各调用方已用 try-catch 保护，使用时注意空安全
 
+    /** Application context——资源加载用，不随 Activity 生命周期失效，避免泄漏 Activity。 */
+    @Volatile
+    private var _appContext: Context? = null
+    val appContext: Context? get() = _appContext
+
     val textureManager = Live2dTextureManager()
     var view = Live2dView()
         private set
@@ -48,11 +54,15 @@ class Live2dDelegate private constructor() {
     @Volatile
     var zoneTouchEnabled = true
 
-    /** 背景色 RGBA（0~1），跟随主题变化。默认浅色。 */
+    /** 背景色 RGBA（0~1），跟随主题变化。默认浅色。
+     *  Kotlin 的 @Volatile 只作用于单个属性，四个通道需各自标注。 */
     @Volatile
     var bgR = 0.98f
+    @Volatile
     var bgG = 0.98f
+    @Volatile
     var bgB = 0.98f
+    @Volatile
     var bgA = 1.0f
 
     private val cubismOption = CubismFramework.Option()
@@ -69,10 +79,28 @@ class Live2dDelegate private constructor() {
 
     fun onStart(activity: Activity) {
         this._activity = activity
+        this._appContext = activity.applicationContext
         isActive = true
     }
 
     fun onStop() { /* no-op */ }
+
+    /** 悬浮窗 Service 单独入口：只提供 application context，供无 Activity 时加载资源。 */
+    fun attachContext(context: Context) {
+        if (_appContext == null) _appContext = context.applicationContext
+    }
+
+    /**
+     * Activity 销毁时清除对它的强引用，避免共享单例长期持有已销毁的 Activity。
+     * appContext 保留（application 级，不会泄漏）。仅当传入的正是当前持有者时清除，
+     * 防止竞态下误清后来者。
+     */
+    fun onActivityDestroyed(activity: Activity) {
+        if (_activity === activity) {
+            _activity = null
+            isActive = false
+        }
+    }
 
     fun onDestroy() {
         view.close()
@@ -207,8 +235,8 @@ class Live2dDelegate private constructor() {
     /** 懒初始化 VoicePlayer（需要 Context，在 onSurfaceCreated 后可用）。 */
     private fun ensureVoicePlayer(): VoicePlayer? {
         if (voicePlayer == null) {
-            val act = _activity ?: return null
-            voicePlayer = VoicePlayer(act.applicationContext)
+            val ctx = _appContext ?: _activity?.applicationContext ?: return null
+            voicePlayer = VoicePlayer(ctx)
         }
         return voicePlayer
     }

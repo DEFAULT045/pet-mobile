@@ -1,5 +1,7 @@
 package com.meapet.mobile.memory
 
+import kotlinx.serialization.Serializable
+
 /**
  * 记忆类型枚举。
  *
@@ -28,6 +30,7 @@ enum class MemoryType {
  * @property sourceMessageId 来源消息 ID（关联回对话）
  * @property tags 标签
  */
+@Serializable
 data class MemoryItem(
     val id: String,
     val content: String,

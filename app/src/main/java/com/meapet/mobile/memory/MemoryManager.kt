@@ -1,6 +1,9 @@
 package com.meapet.mobile.memory
 
 import android.util.Log
+import com.meapet.mobile.settings.SettingsManager
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 记忆管理器——记忆系统的高层入口。
@@ -12,7 +15,7 @@ import android.util.Log
  *
  * ## 用法示例
  * ```kotlin
- * val memoryManager = MemoryManager(memoryService, memoryRepository)
+ * val memoryManager = MemoryManager(memoryService, memoryRepository, settingsManager)
  *
  * // 对话后调用
  * memoryManager.onExchangeComplete("你好", "你好！我是 Mea～")
@@ -23,17 +26,22 @@ import android.util.Log
  *
  * @param service 记忆业务服务
  * @param repository 记忆存储器
+ * @param settingsManager 设置管理器（读取记忆开关）
  */
 class MemoryManager(
     private val service: MemoryService,
-    private val repository: MemoryRepository
+    private val repository: MemoryRepository,
+    private val settingsManager: SettingsManager
 ) {
     companion object {
         private const val TAG = "MemoryManager"
         /** 触发自动摘要的对话轮数。 */
         private const val SUMMARY_INTERVAL = 10
+        /** 近期对话缓存上限（超出丢弃最早的，防止无界增长）。 */
+        private const val MAX_RECENT_EXCHANGES = 50
     }
 
+    private val stateMutex = Mutex()
     private var exchangeCount = 0
     private val recentExchanges = mutableListOf<Pair<String, String>>()
 
@@ -48,8 +56,24 @@ class MemoryManager(
      * 3. 定期触发记忆合并。
      */
     suspend fun onExchangeComplete(userMessage: String, assistantResponse: String) {
-        exchangeCount++
-        recentExchanges.add(userMessage to assistantResponse)
+        // 记忆总开关关闭时，整条事后链路（提取/摘要/合并）都不得触发，
+        // 对话内容不落盘、不外发给摘要模型
+        if (!isMemoryEnabled()) return
+
+        // 计数与缓存的读写都在锁内完成，锁外只拿快照做耗时操作
+        val (count, summarySnapshot) = stateMutex.withLock {
+            exchangeCount++
+            recentExchanges.add(userMessage to assistantResponse)
+            while (recentExchanges.size > MAX_RECENT_EXCHANGES) {
+                recentExchanges.removeAt(0)
+            }
+            val snapshot = if (exchangeCount % SUMMARY_INTERVAL == 0 && recentExchanges.size >= 3) {
+                recentExchanges.takeLast(10).toList()
+            } else {
+                null
+            }
+            exchangeCount to snapshot
+        }
 
         // 1) 提取短期记忆
         val shortTermItems = service.extractFromExchange(userMessage, assistantResponse)
@@ -58,13 +82,13 @@ class MemoryManager(
         }
 
         // 2) 每 SUMMARY_INTERVAL 轮触发一次长期摘要
-        if (exchangeCount % SUMMARY_INTERVAL == 0 && recentExchanges.size >= 3) {
-            Log.i(TAG, "Triggering long-term memory summary ($exchangeCount exchanges)")
-            service.summarizeToLongTerm(recentExchanges.takeLast(10))
+        if (summarySnapshot != null) {
+            Log.i(TAG, "Triggering long-term memory summary ($count exchanges)")
+            service.summarizeToLongTerm(summarySnapshot)
         }
 
         // 3) 每 2 * SUMMARY_INTERVAL 轮触发一次合并
-        if (exchangeCount % (SUMMARY_INTERVAL * 2) == 0) {
+        if (count % (SUMMARY_INTERVAL * 2) == 0) {
             service.consolidate()
         }
     }
@@ -119,15 +143,17 @@ class MemoryManager(
     /**
      * 获取记忆是否启用。
      */
-    fun isMemoryEnabled(): Boolean = true  // 实际应从 SettingsManager 获取
+    fun isMemoryEnabled(): Boolean = settingsManager.isMemoryEnabled()
 
     /**
      * 清除所有记忆。
      */
     suspend fun clearAll() {
         repository.clear()
-        recentExchanges.clear()
-        exchangeCount = 0
+        stateMutex.withLock {
+            recentExchanges.clear()
+            exchangeCount = 0
+        }
         Log.i(TAG, "Memory manager reset")
     }
 }

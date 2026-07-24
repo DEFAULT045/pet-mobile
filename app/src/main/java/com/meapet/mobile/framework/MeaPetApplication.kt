@@ -33,8 +33,11 @@ class MeaPetApplication : Application() {
         // 2) 注册生命周期回调
         registerComponentCallbacks(container.lifecycleManager)
 
-        // 3) 打印启动信息
-        Log.i(TAG, "App initialized: config=$container.config")
+        // 3) 异步预热（加载持久化的记忆数据，不阻塞主线程）
+        container.warmUp()
+
+        // 4) 打印启动信息
+        Log.i(TAG, "App initialized: config=${container.config}")
     }
 
     override fun onTerminate() {

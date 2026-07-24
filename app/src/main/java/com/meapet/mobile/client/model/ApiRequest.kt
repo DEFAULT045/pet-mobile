@@ -26,11 +26,13 @@ object ApiRequest {
         model: String,
         messages: List<JsonObject>,
         temperature: Double? = null,
+        maxTokens: Int? = null,
         stream: Boolean = false
     ): String = buildJsonObject {
         put("model", model)
         put("messages", buildJsonArray { messages.forEach { add(it) } })
         temperature?.let { put("temperature", it) }
+        maxTokens?.let { put("max_tokens", it) }
         put("stream", stream)
     }.let { json.encodeToString(it) }
 

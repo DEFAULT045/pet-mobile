@@ -1,19 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
+   Android 12+ 的备份 / 设备迁移规则。
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- DataStore 中保存了 API Key，禁止随云备份上传 -->
+        <exclude domain="file" path="datastore/meapet_preferences.preferences_pb" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <!-- 设备间迁移同样排除，避免密钥落入非预期设备 -->
+        <exclude domain="file" path="datastore/meapet_preferences.preferences_pb" />
     </device-transfer>
-    -->
 </data-extraction-rules>

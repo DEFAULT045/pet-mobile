@@ -15,6 +15,7 @@ android {
     defaultConfig {
         applicationId = "com.meapet.mobile"
         minSdk = 26
+        targetSdk = 36
         versionCode = 3
         versionName = "1.0.2"
 
@@ -78,5 +79,5 @@ dependencies {
 
     // 测试所需
     testImplementation(kotlin("test"))
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation(libs.kotlinx.coroutines.test)
 }

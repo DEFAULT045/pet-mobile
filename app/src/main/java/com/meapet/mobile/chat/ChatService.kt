@@ -3,14 +3,15 @@ package com.meapet.mobile.chat
 import android.util.Log
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.model.ApiRequest
+import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.framework.AppConfig
 import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.settings.SettingsManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.UUID
 
 /**
  * 聊天业务服务。
@@ -26,17 +27,21 @@ import java.util.UUID
  * - 通过 [MemoryManager] 与记忆系统交互（而非直接操作 MemoryRepository）；
  * - 通过 [SettingsManager] 获取配置（而非硬编码）。
  *
- * @param client OpenAI 兼容 HTTP 客户端
+ * @param clientProvider 提供 OpenAI 兼容 HTTP 客户端的 provider（每次请求重新获取，
+ *   以便 API Key / Base URL 变更重建客户端后立即生效）
  * @param conversationManager 会话管理器
  * @param memoryManager 记忆管理器（null = 禁用记忆）
  * @param settingsManager 设置管理器
+ * @param postProcessScope 事后处理（记忆提取/摘要）用的应用级作用域；
+ *   摘要可能触发额外网络请求，不能阻塞 sendMessage 返回
  * @param config 应用配置
  */
 class ChatService(
-    private val client: OpenAiCompatibleClient,
+    private val clientProvider: () -> OpenAiCompatibleClient,
     private val conversationManager: ConversationManager,
     private val memoryManager: MemoryManager?,
     private val settingsManager: SettingsManager,
+    private val postProcessScope: CoroutineScope,
     private val config: AppConfig = AppConfig.DEFAULT
 ) {
     companion object {
@@ -66,6 +71,7 @@ class ChatService(
                 val systemPrompt = settingsManager.getSystemPrompt()
                 val model = settingsManager.getModel()
                 val temperature = settingsManager.getTemperature()
+                val maxTokens = settingsManager.getMaxTokens()
 
                 // 4) 构建 API 请求
                 val apiMessages = conversationManager.buildApiMessages(
@@ -82,28 +88,50 @@ class ChatService(
                     model = model,
                     messages = jsonMessages,
                     temperature = temperature,
+                    maxTokens = maxTokens,
                     stream = false
                 )
 
                 Log.d(TAG, "Sending request to $model (${apiMessages.size} messages)")
 
                 // 5) 发送请求
-                val responseJson = client.chatCompletion(requestBody)
+                val responseJson = clientProvider().chatCompletion(requestBody)
 
-                // 6) 解析响应
-                val assistantContent = parseChatResponse(responseJson)
+                // 6) 解析响应（choices 为空或 content 缺失视为失败，不入史）
+                val assistantContent = ApiResponse.chatCompletionContent(responseJson)
+                    ?.takeIf { it.isNotBlank() }
+                if (assistantContent == null) {
+                    Log.w(TAG, "Unexpected API response: missing choices or content")
+                    return@withContext Result.failure(
+                        IllegalStateException("API 响应中没有有效的回复内容")
+                    )
+                }
                 val assistantMessage = ChatMessage(
                     role = ChatRole.assistant,
                     content = assistantContent
                 )
                 conversationManager.addMessage(assistantMessage)
 
-                // 7) 事后处理：触发记忆提取
-                memoryManager?.onExchangeComplete(content, assistantContent)
+                // 7) 事后处理：记忆提取/摘要转后台，不阻塞本次回复返回
+                //   （每 N 轮的自动摘要是一次额外 LLM 请求，同步等它会让 UI
+                //     在拿到回复后仍长时间显示加载中）
+                memoryManager?.let { mm ->
+                    postProcessScope.launch {
+                        try {
+                            mm.onExchangeComplete(content, assistantContent)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Memory post-processing failed", e)
+                        }
+                    }
+                }
 
-                Log.d(TAG, "Response received: ${assistantContent.take(80)}...")
+                Log.d(TAG, "Response received (${assistantContent.length} chars)")
                 Result.success(userMessage to assistantMessage)
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send message", e)
                 Result.failure(e)
@@ -118,10 +146,14 @@ class ChatService(
         val lastUserMsg = conversationManager.lastUserMessage()
             ?: return Result.failure(IllegalStateException("No message to retry"))
 
-        // 移除最后一条 AI 回复（如果有）
-        conversationManager.lastAssistantMessage()?.let {
-            removeLastMessage()
-        }
+        // 把该条 user 之后的 assistant 回复（若有）连同 user 本身一并移除，
+        // 重发时由 sendMessage 统一重新入史，避免消息重复
+        val history = conversationManager.getMessages()
+        val userIdx = history.indexOfLast { it.id == lastUserMsg.id }
+        history.drop(userIdx + 1)
+            .filter { it.role == ChatRole.assistant }
+            .forEach { conversationManager.removeMessage(it.id) }
+        conversationManager.removeMessage(lastUserMsg.id)
 
         return sendMessage(lastUserMsg.content)
     }
@@ -137,47 +169,5 @@ class ChatService(
     fun clearHistory() {
         conversationManager.clear()
         Log.i(TAG, "Chat history cleared")
-    }
-
-    /** 移除最后一条消息。 */
-    fun removeLastMessage() {
-        conversationManager.getMessages().lastOrNull()?.let {
-            // ConversationManager 不直接提供 remove，这里通过 clear + re-add 实现
-            val all = conversationManager.getMessages().dropLast(1)
-            conversationManager.clear()
-            conversationManager.addMessages(all)
-        }
-    }
-
-    // ── API 响应解析 ──────────────────────────────────
-
-    /**
-     * 解析 OpenAI 兼容的 chat completion 响应。
-     *
-     * @param json 原始 JSON 响应字符串
-     * @return 提取出的助手消息内容
-     */
-    private fun parseChatResponse(json: String): String {
-        return try {
-            val root = JSONObject(json)
-            val choices = root.optJSONArray("choices")
-            if (choices != null && choices.length() > 0) {
-                val choice = choices.getJSONObject(0)
-                val message = choice.optJSONObject("message")
-                if (message != null) {
-                    message.optString("content", "")
-                } else {
-                    // Stream 模式可能使用 delta
-                    val delta = choice.optJSONObject("delta")
-                    delta?.optString("content", "") ?: ""
-                }
-            } else {
-                Log.w(TAG, "Unexpected API response: no choices")
-                ""
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse chat response", e)
-            "(解析响应失败)"
-        }
     }
 }
