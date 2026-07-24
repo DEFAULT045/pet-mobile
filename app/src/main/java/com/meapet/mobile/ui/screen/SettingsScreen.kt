@@ -83,7 +83,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meapet.mobile.ui.theme.THEME_PRESETS
-import com.meapet.mobile.ui.theme.findPreset
 import com.meapet.mobile.viewmodel.SettingsViewModel
 
 /**
@@ -440,68 +439,6 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(24.dp))
-
-            // ══════════════════════════════════════════
-            //  关于
-            // ══════════════════════════════════════════
-            SectionTitle("关于")
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                )
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    // ── 标题与简介 ──
-                    Text("MeaPet —— 梅尔桌宠", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "一只基于 Live2D 的 AI 梅尔 非常不完善 但是初版花了我 0.14B Tokens\n" +
-                                "目前为止共消耗 0.268B Tokens",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "版本 ${state.appVersion}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(8.dp))
-
-                    // ── 开发与技术 ──
-                    Text(
-                        "借助 Claude Code CLI，由 DeepSeek V4 Flash 强力赋能辅助开发",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "Author: llz121517 (GitHub)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "反馈/交流 QQ: 748791823",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "技术栈：Live2D Cubism · Jetpack Compose · Ktor · Coroutines",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(32.dp))
         }
     }
 }
@@ -509,6 +446,7 @@ fun SettingsScreen(
 // ═══════════════════════════════════════════════════
 //  子组件
 // ═══════════════════════════════════════════════════
+
 
 @Composable
 private fun SectionTitle(title: String) {
@@ -685,22 +623,17 @@ private fun ColorPresetSelector(
                         .width(56.dp)
                 ) {
                     // 色块圆
+                    val borderMod = if (isSelected) {
+                        Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    } else {
+                        Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), CircleShape)
+                    }
                     Box(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
                             .background(preset.seed)
-                            .then(
-                                if (isSelected) Modifier.border(
-                                    3.dp,
-                                    MaterialTheme.colorScheme.primary,
-                                    CircleShape
-                                ) else Modifier.border(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                    CircleShape
-                                )
-                            )
+                            .then(borderMod)
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(

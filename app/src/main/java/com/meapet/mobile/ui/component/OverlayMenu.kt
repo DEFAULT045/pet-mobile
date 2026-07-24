@@ -42,6 +42,7 @@ fun OverlayMenu(
     onSettings: () -> Unit = {},
     onClearConversation: () -> Unit = {},
     onToggleOverlay: () -> Unit = {},
+    onAbout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -116,6 +117,12 @@ fun OverlayMenu(
                             text = { Text("悬浮窗", style = MaterialTheme.typography.bodyMedium) },
                             onClick = { menuExpanded = false; onToggleOverlay() },
                             leadingIcon = { Text("🪟", style = MaterialTheme.typography.bodyMedium) }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("关于", style = MaterialTheme.typography.bodyMedium) },
+                            onClick = { menuExpanded = false; onAbout() },
+                            leadingIcon = { Text("ℹ", style = MaterialTheme.typography.bodyMedium) }
                         )
                     }
                 }
