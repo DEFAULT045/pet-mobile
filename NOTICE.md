@@ -38,3 +38,16 @@ Agreement**, which you must accept directly with Live2D Inc.
 when downloading.
 
   https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html
+
+---
+
+## Mea (梅尔) Live2D Character Model
+
+The character Live2D model shipped / used by this app is a community work
+and is **not** licensed under this project's MIT license.
+
+- **Source:** Bilibili — [Live2D模型分享 - 梅娅]
+- **URL:** https://www.bilibili.com/video/BV1AoX7BXEaN
+- **Notes:** Copyright remains with the original author(s). Follow the
+  terms stated in the original release when redistributing or reusing
+  the model assets.

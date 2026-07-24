@@ -11,6 +11,7 @@ import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.memory.MemoryRepository
 import com.meapet.mobile.memory.MemoryService
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -105,6 +106,11 @@ class AppContainer(
         CoroutineScope(Dispatchers.Default + SupervisorJob())
     }
 
+    /** 版本更新检测（独立 HTTP 引擎，不与用户 API Key 绑定）。 */
+    val updateChecker: UpdateChecker by lazy {
+        UpdateChecker(currentVersionProvider = { readAppVersion() })
+    }
+
     /** 生命周期管理器。 */
     val lifecycleManager: LifecycleManager by lazy {
         LifecycleManager(
@@ -125,6 +131,13 @@ class AppContainer(
         applicationScope.launch(Dispatchers.IO) {
             memoryRepository.loadFromDisk()
         }
+    }
+
+    /** 从 PackageManager 读取当前 versionName。 */
+    fun readAppVersion(): String = try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.0"
+    } catch (_: Exception) {
+        "1.0.0"
     }
 
     // ── 运行时热替换 ──────────────────────────────────

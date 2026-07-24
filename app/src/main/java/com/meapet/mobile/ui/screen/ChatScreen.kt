@@ -33,8 +33,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -171,6 +174,25 @@ private fun ChatPage(
         }
     }
 
+    // 启动静默更新提示：有新版本时底部轻提示，可点「查看」打开 GitHub Release
+    val uriHandler = LocalUriHandler.current
+    LaunchedEffect(state.updateNotice) {
+        val notice = state.updateNotice ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = notice.message,
+            actionLabel = "查看",
+            duration = SnackbarDuration.Long,
+            withDismissAction = true
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            try {
+                uriHandler.openUri(notice.url)
+            } catch (_: Exception) {
+            }
+        }
+        chatViewModel.onEvent(ChatEvent.DismissUpdateNotice)
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Layer 1: 消息列表 ──
         LazyColumn(
@@ -243,18 +265,33 @@ private fun ChatPage(
         )
 
         // ── Layer 4: Snackbar ──
+        // 动作文案（如「查看」）跟随主题 primary，避免默认 inversePrimary 固定偏蓝
+        val snackbarActionColor = MaterialTheme.colorScheme.primary
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 100.dp)
-        )
+        ) { data ->
+            Snackbar(
+                snackbarData = data,
+                actionColor = snackbarActionColor,
+                actionContentColor = snackbarActionColor
+            )
+        }
 
         // ── Layer 5: 关于卡片 ──
         if (showDialog) {
             AboutDialog(
                 visible = showAbout,
-                onDismiss = { showAbout = false }
+                onDismiss = { showAbout = false },
+                isCheckingUpdate = state.isCheckingUpdate,
+                updateMessage = state.aboutUpdateMessage,
+                releaseUrl = state.aboutReleaseUrl,
+                onCheckUpdate = { chatViewModel.onEvent(ChatEvent.CheckForUpdate) },
+                onDismissUpdateMessage = {
+                    chatViewModel.onEvent(ChatEvent.DismissAboutUpdateMessage)
+                }
             )
         }
     }
@@ -265,11 +302,21 @@ private fun ChatPage(
  *
  * @param visible 控制动画：true=入场，false=退场
  * @param onDismiss 关闭回调（退场动画由外部 [showDialog] 延迟移除保证完整播放）
+ * @param isCheckingUpdate 是否正在检测更新
+ * @param updateMessage 手动检测结果文案
+ * @param releaseUrl 有新版本时的发布页 URL
+ * @param onCheckUpdate 点击「检查更新」
+ * @param onDismissUpdateMessage 关闭检测结果文案
  */
 @Composable
 private fun AboutDialog(
     visible: Boolean,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isCheckingUpdate: Boolean = false,
+    updateMessage: String? = null,
+    releaseUrl: String? = null,
+    onCheckUpdate: () -> Unit = {},
+    onDismissUpdateMessage: () -> Unit = {}
 ) {
     val animProgress = remember { Animatable(0f) }
 
@@ -279,6 +326,11 @@ private fun AboutDialog(
         } else {
             animProgress.animateTo(0f, animationSpec = tween(200))
         }
+    }
+
+    // 关闭对话框时清掉手动检测文案，避免下次打开残留
+    LaunchedEffect(visible) {
+        if (!visible) onDismissUpdateMessage()
     }
 
     Dialog(
@@ -368,15 +420,34 @@ private fun AboutDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
 
+                if (updateMessage != null) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = updateMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (releaseUrl != null) {
+                        Spacer(Modifier.height(2.dp))
+                        LinkItem(
+                            text = "打开更新页面",
+                            url = releaseUrl,
+                            uriHandler = uriHandler,
+                            style = linkStyle
+                        )
+                    }
+                }
+
                 Spacer(Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     TextButton(
-                        onClick = { /* TODO: 检查更新 */ }
+                        onClick = onCheckUpdate,
+                        enabled = !isCheckingUpdate
                     ) {
-                        Text("检查更新")
+                        Text(if (isCheckingUpdate) "检测中…" else "检查更新")
                     }
                     TextButton(
                         onClick = {

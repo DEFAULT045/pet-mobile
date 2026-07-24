@@ -13,6 +13,7 @@ Android 上的 Live2D AI 桌宠：在主页与系统悬浮窗里渲染 Live2D �
 - **本地记忆** — 短期提取 + 定期长期摘要，持久化到本机，可在设置中开关
 - **多主题配色** — Material You 动态取色 + 多套预设色板，支持浅色 / 深色 / 跟随系统
 - **悬浮窗模式** — 前台 Service 浮窗常驻，支持拖拽、捏合缩放、双击关闭
+- **检测更新** — 启动静默检查 GitHub Releases；关于页可手动检测
 
 ## 开始使用
 
@@ -32,12 +33,19 @@ Android 上的 Live2D AI 桌宠：在主页与系统悬浮窗里渲染 Live2D �
 从 [Releases](https://github.com/llz121517/mea-pet-mobile/releases) 页面下载最新的 APK 直接安装，无需自行编译。
 
 ```bash
-adb install MeaPet-v1.0.2.apk
+adb install MeaPet-v1.1.0.apk
 ```
 
 #### 方式二：手动编译
 
-**1. 下载 Live2D Cubism Core**
+**1. 克隆仓库**
+
+```bash
+git clone https://github.com/llz121517/mea-pet-mobile.git
+cd mea-pet-mobile
+```
+
+**2. 下载 Live2D Cubism Core**
 
 MeaPet 依赖 Live2D Cubism Core 原生库，受 Live2D 专有软件许可协议保护，**不随仓库分发**。你需要手动下载并放入项目：
 
@@ -52,15 +60,13 @@ MeaPet/
         └── Live2DCubismCore.aar   ← 手动放入
 ```
 
-**2. 编译 APK**
+**3. 编译 APK**
 
 ```bash
-git clone https://github.com/llz121517/mea-pet-mobile.git
-cd mea-pet-mobile
 ./gradlew assembleDebug
 ```
 
-**3. 安装**
+**4. 安装**
 
 ```bash
 adb install app/build/outputs/apk/debug/app-debug.apk
@@ -73,8 +79,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | 字段 | 说明 |
 |------|------|
 | **API Key** | API 密钥 |
-| **API 地址** | OpenAI 兼容的 API 基础 URL |
-| **模型** | 使用的模型名称（如 `gpt-4o-mini`） |
+| **API 地址** | OpenAI 兼容的 API 基础 URL（可带或不带 `/v1`，客户端会自动规范化） |
+| **模型** | 使用的模型名称（如 `gpt-4o-mini`）；也可点「获取模型列表」从端点拉取后点选 |
 | **Temperature** | 生成温度 (0.0–2.0) |
 | **最大 Token** | 单次响应最大 Token 数 |
 
@@ -84,8 +90,16 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Coroutines  ·  GLSurfaceView
 ```
 
+## Live2D 模型来源
+
+应用内展示的梅尔 Live2D 模型资源来自社区作品，原始出处：
+
+- [Live2D模型分享 - 梅娅 / Bilibili](https://www.bilibili.com/video/BV1AoX7BXEaN)
+
+使用该模型时请遵循原作者的发布说明与授权要求。模型版权归原作者所有，与本仓库 MIT 许可证无关。
+
 ## 许可证
 
 本项目基于 [MIT](LICENSE) 许可证开源。
 
-本项目包含 Live2D 第三方组件，其许可证条款详见 [NOTICE.md](NOTICE.md)。使用 Live2D Cubism Core 需要单独下载并接受 Live2D 专有软件许可协议。
+本项目包含 Live2D 第三方组件，其许可证条款详见 [NOTICE.md](NOTICE.md)。使用 Live2D Cubism Core 需要单独下载并接受 Live2D 专有软件许可协议。应用内 Live2D 角色模型来源见上文「Live2D 模型来源」。

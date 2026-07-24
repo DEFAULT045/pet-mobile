@@ -12,11 +12,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## 2026-07-23
+## [1.1.0] - 2026-07-25
 
-### Refactor
+### Added
 
-- **包名** — `com.llz121517.meapet` 改为 `com.meapet.mobile`。
+- **检测新版本** — 启动时静默请求 GitHub `releases/latest`，有正式新版本时在聊天页底部 Snackbar 轻提示（可点「查看」打开发布页）；关于卡片「检查更新」绑定同一逻辑，手动检测会反馈有更新 / 已最新 / 失败。网络异常启动路径静默失败，不打扰。Snackbar 动作色跟随主题 `primary`。
+- **获取模型列表** — 设置页模型输入框下增加「获取模型列表」：用当前 API Key / 地址请求 `/v1/models`，解析 id 列表后点选写回；兼容 `data[]` 与顶层数组两种响应格式，并补充解析单测。
+- **关于页可点击外链** — 关于卡片内新增主题色（`primary`）下划线链接：Live2D 模型来源、GitHub 仓库、交流 QQ 群。
+- **Live2D 模型来源** — 关于页补充模型来源入口（Bilibili）。
+
+### Fixed
+
+- **记忆链路** — 启动时加载持久化记忆；手写 JSON 改为 `kotlinx.serialization` + 原子写；记忆总开关真正关闭提取 / 摘要 / 注入；访问统计落盘。
+- **聊天链路** — 清空会话时取消在途请求，避免回复回写；记忆后处理异步化，摘要不再卡住发送。
+- **API 客户端** — `reloadClient` 可热重建；`HttpTimeout` 适配 LLM 长回复；`baseUrl` 规范化（用户可带或不带 `/v1`，客户端统一补齐后拼 `models` / `chat/completions`）；`max_tokens` 入请求；取消与空响应处理。
+- **悬浮窗 / GL** — `START_NOT_STICKY`、失败自停、native 模型释放、捏合后拖动锚点与屏幕边界钳制；Activity 与 Service 的 GL 线程串行化，避免共享 shader 单例竞态；单例改用 application context，避免持有已销毁 Activity。
+- **设置保存** — 输入框失焦保存、Slider 结束写盘；`SettingsManager` 增加内存快照缓存；DataStore 备份排除敏感项。
+- **「变态」语音** — 触摸语音文件原先只有 “hen”，已更换为正确的 “hentai” 资源。
+
+### Changed
+
+- **关于卡片** — 从设置页挪到聊天页三点菜单入口；改为带动画的悬浮对话框，展示应用介绍、版本号与技术栈，系统返回键可关闭；设置页原关于模块移除。
+- **包名迁移** — `com.llz121517.meapet` → `com.meapet.mobile`（namespace / applicationId 同步；注意：applicationId 变更后与 1.0.x 安装包不连续升级，需重新安装）。
+- **targetSdk 36** — 补充 `POST_NOTIFICATIONS`、前台服务 `specialUse` 声明。
+- **死代码清理** — 移除 `Live2dActivity`、`TouchManager` 等未使用组件。
+- **版本号升至 `1.1.0`**（versionCode 4）。
+
+### Notes
+
+- 本版本相对 1.0.2 含用户可见新功能（更新检测 / 模型列表 / 关于外链）与多项修复，按语义化版本升 **MINOR**；未升 MAJOR，因 API 配置与聊天流程仍向后兼容。包名变更对旧安装是例外，见上。
 
 ---
 

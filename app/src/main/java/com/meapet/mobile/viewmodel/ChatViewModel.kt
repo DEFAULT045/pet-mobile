@@ -8,9 +8,12 @@ import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.chat.ChatService
 import com.meapet.mobile.chat.ChatUiState
+import com.meapet.mobile.chat.UpdateNoticeUi
 import com.meapet.mobile.framework.MeaPetApplication
 import com.meapet.mobile.live2d.Live2dManager
 import com.meapet.mobile.memory.MemoryManager
+import com.meapet.mobile.update.UpdateCheckResult
+import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,12 +39,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val container = MeaPetApplication.from(application)
     private val chatService: ChatService = container.chatService
     private val memoryManager: MemoryManager? = container.memoryManager
+    private val updateChecker: UpdateChecker = container.updateChecker
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     /** 在途发送任务；清空会话时取消，避免回复回写到已清空的会话。 */
     private var sendJob: Job? = null
+
+    /** 关于页手动检测任务。 */
+    private var checkUpdateJob: Job? = null
 
     init {
         // 初始化时从 ConversationManager 加载已有消息
@@ -72,6 +79,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        // 启动时静默检测一次：仅在有新版本时提示，失败不打扰
+        viewModelScope.launch {
+            when (val result = updateChecker.check()) {
+                is UpdateCheckResult.UpdateAvailable -> {
+                    _state.update {
+                        it.copy(
+                            updateNotice = UpdateNoticeUi(
+                                message = "发现新版本 v${result.release.versionName}",
+                                url = result.release.htmlUrl
+                            )
+                        )
+                    }
+                }
+                is UpdateCheckResult.UpToDate,
+                is UpdateCheckResult.Failed -> Unit
+            }
+        }
     }
 
     /**
@@ -86,6 +111,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             is ChatEvent.RetryLastMessage -> retryLastMessage()
             is ChatEvent.DismissError -> dismissError()
             is ChatEvent.DismissMemoryInfo -> dismissMemoryInfo()
+            is ChatEvent.DismissUpdateNotice -> dismissUpdateNotice()
+            is ChatEvent.CheckForUpdate -> checkForUpdate()
+            is ChatEvent.DismissAboutUpdateMessage -> dismissAboutUpdateMessage()
         }
     }
 
@@ -201,5 +229,57 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun dismissMemoryInfo() {
         _state.update { it.copy(memoryContextInfo = null) }
+    }
+
+    private fun dismissUpdateNotice() {
+        _state.update { it.copy(updateNotice = null) }
+    }
+
+    private fun dismissAboutUpdateMessage() {
+        _state.update { it.copy(aboutUpdateMessage = null, aboutReleaseUrl = null) }
+    }
+
+    /** 关于页手动检测：始终反馈结果（有更新 / 已是最新 / 失败）。 */
+    private fun checkForUpdate() {
+        if (_state.value.isCheckingUpdate) return
+        checkUpdateJob?.cancel()
+        _state.update {
+            it.copy(
+                isCheckingUpdate = true,
+                aboutUpdateMessage = null,
+                aboutReleaseUrl = null
+            )
+        }
+        checkUpdateJob = viewModelScope.launch {
+            when (val result = updateChecker.check()) {
+                is UpdateCheckResult.UpdateAvailable -> {
+                    _state.update {
+                        it.copy(
+                            isCheckingUpdate = false,
+                            aboutUpdateMessage = "发现新版本 v${result.release.versionName}",
+                            aboutReleaseUrl = result.release.htmlUrl
+                        )
+                    }
+                }
+                is UpdateCheckResult.UpToDate -> {
+                    _state.update {
+                        it.copy(
+                            isCheckingUpdate = false,
+                            aboutUpdateMessage = "当前已是最新版本（v${result.currentVersion}）",
+                            aboutReleaseUrl = null
+                        )
+                    }
+                }
+                is UpdateCheckResult.Failed -> {
+                    _state.update {
+                        it.copy(
+                            isCheckingUpdate = false,
+                            aboutUpdateMessage = result.message,
+                            aboutReleaseUrl = null
+                        )
+                    }
+                }
+            }
+        }
     }
 }

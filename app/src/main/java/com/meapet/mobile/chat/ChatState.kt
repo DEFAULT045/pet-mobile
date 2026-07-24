@@ -11,17 +11,31 @@ package com.meapet.mobile.chat
  * @property error 错误信息（非 null 时显示错误提示）
  * @property memoryContextInfo 当前记忆上下文摘要（如 "已加载 3 条记忆"）
  * @property inputText 输入框当前文本
+ * @property updateNotice 启动静默检测发现的新版本提示（Snackbar 用）
+ * @property aboutUpdateMessage 关于页手动检测结果文案
+ * @property aboutReleaseUrl 关于页检测有新版本时的发布页 URL
+ * @property isCheckingUpdate 关于页是否正在检测更新
  */
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
     val memoryContextInfo: String? = null,
-    val inputText: String = ""
+    val inputText: String = "",
+    val updateNotice: UpdateNoticeUi? = null,
+    val aboutUpdateMessage: String? = null,
+    val aboutReleaseUrl: String? = null,
+    val isCheckingUpdate: Boolean = false
 ) {
     val isError: Boolean get() = error != null
     val canSend: Boolean get() = !isLoading && inputText.isNotBlank()
 }
+
+/** UI 层展示的更新提示。 */
+data class UpdateNoticeUi(
+    val message: String,
+    val url: String
+)
 
 /**
  * 聊天事件——ViewModel 接收的用户操作。
@@ -47,4 +61,13 @@ sealed interface ChatEvent {
 
     /** 清除记忆信息提示（Snackbar 已显示）。 */
     data object DismissMemoryInfo : ChatEvent
+
+    /** 启动静默检测更新提示已展示。 */
+    data object DismissUpdateNotice : ChatEvent
+
+    /** 关于页手动检测更新。 */
+    data object CheckForUpdate : ChatEvent
+
+    /** 关于页检测结果提示已展示/清除。 */
+    data object DismissAboutUpdateMessage : ChatEvent
 }
