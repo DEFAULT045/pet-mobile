@@ -111,6 +111,7 @@ fun SettingsScreen(
     var localSystemPrompt by remember { mutableStateOf(state.systemPrompt) }
     var localTemperature by remember { mutableStateOf(state.temperature.toFloat()) }
     var localMaxTokens by remember { mutableStateOf(state.maxTokens.toFloat()) }
+    var localSummaryInterval by remember { mutableStateOf(state.summaryInterval.toFloat()) }
 
     // 离开页面时兜底保存（焦点还留在输入框内的场景）
     DisposableEffect(Unit) {
@@ -398,6 +399,28 @@ fun SettingsScreen(
                 checked = state.enableAutoSummary,
                 darkTheme = darkTheme,
                 onCheckedChange = { settingsViewModel.updateEnableAutoSummary(it) }
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "摘要轮次: 每 ${localSummaryInterval.toInt()} 轮对话总结一次",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (state.enableAutoSummary) 1f else 0.5f
+                )
+            )
+            Slider(
+                value = localSummaryInterval,
+                onValueChange = { localSummaryInterval = it },
+                onValueChangeFinished = {
+                    settingsViewModel.updateSummaryInterval(localSummaryInterval.toInt())
+                },
+                valueRange = 3f..30f,
+                steps = 26,
+                enabled = state.enableAutoSummary,
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(inactiveTrackColor = inactiveTrackColor)
             )
 
             Spacer(Modifier.height(16.dp))

@@ -5,32 +5,36 @@ import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.model.ApiRequest
 import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.framework.AppConfig
+import com.meapet.mobile.memory.MemoryOpsProtocol.MemoryOp
 import com.meapet.mobile.settings.SettingsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.UUID
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /**
  * 记忆业务服务。
  *
  * ## 职责
- * - 从对话中提取记忆（调用 AI 总结）；
- * - 合并 / 去重 / 压缩记忆；
- * - 判断记忆重要性。
+ * - 应用大模型在回复中声明的记忆操作（[applyOps]，来自 [MemoryOpsProtocol]）；
+ * - 定期把短期记忆摘要压缩为一条长期记忆（[summarizeShortTermMemories]）。
+ *
+ * 记忆该不该创建、什么类型、多重要，全部由大模型自己判断——本类不再做
+ * 基于长度/关键词的启发式提取，只负责校验、落库与摘要编排。
  *
  * ## 依赖关系
  * - [MemoryRepository] — 数据存储（必需）；
- * - [OpenAiCompatibleClient] — 用于 AI 摘要（可选，无此 client 时降级为纯规则提取）；
+ * - [OpenAiCompatibleClient] — 用于摘要短期记忆（可选，无此 client 时静默跳过摘要）；
  * - [SettingsManager] — 读取记忆开关配置。
  *
  * ## 低耦合
  * - 不依赖 Chat 模块中的任何类型，仅操作 [MemoryItem]；
- * - 调用方（如 ChatService）决定何时触发记忆提取。
+ * - 调用方（[MemoryManager]）决定何时触发。
  *
  * @param repository 记忆存储器
  * @param summarizationClient 提供 AI 总结用 HTTP 客户端的 provider（每次调用重新获取，
- *   以便配置变更重建客户端后立即生效；返回 null = 降级）
+ *   以便配置变更重建客户端后立即生效；返回 null = 跳过摘要）
  * @param settingsManager 设置管理器
  * @param config 应用配置
  */
@@ -44,78 +48,100 @@ class MemoryService(
         private const val TAG = "MemoryService"
     }
 
+    @Serializable
+    private data class SummaryResult(
+        val content: String = "",
+        val importance: Float = 0.5f,
+        val keywords: List<String> = emptyList()
+    )
+
+    private val json = Json { ignoreUnknownKeys = true }
+
     /**
-     * 从一条对话中提取短期记忆。
+     * 应用模型本轮声明的记忆操作（创建/更新/删除）。
      *
-     * @param userMessage 用户消息
-     * @param assistantMessage 助手回复
-     * @return 提取出的记忆条目（可能为空）
+     * 单条操作失败（如校验不通过）只记日志跳过，不影响其余操作。
      */
-    suspend fun extractFromExchange(
-        userMessage: String,
-        assistantMessage: String
-    ): List<MemoryItem> = withContext(Dispatchers.Default) {
-        if (!settingsManager.isMemoryEnabled()) return@withContext emptyList()
-
-        val items = mutableListOf<MemoryItem>()
-
-        // 规则 1：较长的用户消息可能包含重要信息
-        if (userMessage.length > 50) {
-            items.add(
-                MemoryItem(
-                    id = UUID.randomUUID().toString(),
-                    content = "[对话] 用户提到: ${userMessage.take(200)}",
-                    type = MemoryType.SHORT_TERM,
-                    importance = calculateImportance(userMessage),
-                    tags = extractTags(userMessage)
-                )
-            )
+    suspend fun applyOps(ops: List<MemoryOp>) {
+        var applied = 0
+        for (op in ops) {
+            try {
+                when (op) {
+                    is MemoryOp.Create -> repository.save(
+                        MemoryItem(
+                            id = MemoryItem.newId(),
+                            content = op.content,
+                            type = op.type,
+                            importance = op.importance.coerceIn(0f, 1f),
+                            keywords = op.keywords.take(8)
+                        )
+                    ).also { Log.i(TAG, "Created ${it.type} memory ${it.id}") }
+                    is MemoryOp.Update -> {
+                        val existing = repository.findById(op.targetId)
+                        if (existing == null) {
+                            // targetId 过期或模型幻觉——退化为新建，避免更新意图被静默丢弃
+                            Log.w(TAG, "Update target ${op.targetId} not found, falling back to create")
+                            repository.save(
+                                MemoryItem(
+                                    id = MemoryItem.newId(),
+                                    content = op.content,
+                                    type = op.type,
+                                    importance = op.importance.coerceIn(0f, 1f),
+                                    keywords = op.keywords.take(8)
+                                )
+                            )
+                        } else {
+                            repository.save(
+                                existing.copy(
+                                    content = op.content,
+                                    type = op.type,
+                                    importance = op.importance.coerceIn(0f, 1f),
+                                    keywords = op.keywords.take(8)
+                                )
+                            )
+                        }
+                    }
+                    is MemoryOp.Delete -> repository.delete(op.targetId)
+                }
+                applied++
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to apply memory op: $op", e)
+            }
         }
-
-        // 规则 2：助手的较长回复可能包含重要回应
-        if (assistantMessage.length > 100) {
-            items.add(
-                MemoryItem(
-                    id = UUID.randomUUID().toString(),
-                    content = "[回应] 助手回复: ${assistantMessage.take(150)}",
-                    type = MemoryType.SHORT_TERM,
-                    importance = 0.4f,
-                    tags = extractTags(assistantMessage)
-                )
-            )
-        }
-
-        Log.d(TAG, "Extracted ${items.size} short-term memories from exchange")
-        items
+        if (ops.isNotEmpty()) Log.i(TAG, "Applied $applied/${ops.size} memory ops")
     }
 
     /**
-     * 使用 AI 对近期对话进行摘要，生成长时记忆。
+     * 把当前所有短期记忆摘要压缩为一条长期记忆。
      *
-     * @param recentMessages 近期对话列表（用户 + 助手交替）
-     * @return 生成的长期记忆条目，若失败则返回 null
+     * 成功后删除参与本次摘要的短期条目（只删调用开始时取到的快照，
+     * 不影响调用期间新产生的短期记忆）；失败时短期记忆原样保留，下次触发再试。
+     *
+     * @return 生成的长期记忆条目；无短期记忆可摘要或调用失败均返回 null
      */
-    suspend fun summarizeToLongTerm(
-        recentMessages: List<Pair<String, String>>
-    ): MemoryItem? {
-        // 记忆总开关优先于自动摘要子开关：关记忆时对话不得外发给摘要模型
+    suspend fun summarizeShortTermMemories(): MemoryItem? {
         if (!settingsManager.isMemoryEnabled()) return null
         if (!settingsManager.isAutoSummaryEnabled()) return null
+
+        val pending = repository.getByType(MemoryType.SHORT_TERM)
+        if (pending.isEmpty()) return null
+
         val client = summarizationClient() ?: return null
-        if (recentMessages.size < 3) return null  // 对话太短不摘要
 
         return withContext(Dispatchers.IO) {
             try {
-                val conversationText = recentMessages.joinToString("\n") { (u, a) ->
-                    "用户: $u\n助手: $a"
-                }
-
+                val itemsText = pending.joinToString("\n") { "- ${it.content}" }
                 val prompt = buildString {
-                    appendLine("请对以下对话进行摘要，提取需要长期记住的重要信息。")
-                    appendLine("格式要求：用一句话概括最重要的事实或偏好。")
+                    appendLine("以下是若干条短期记忆，请提炼合并为一条长期记忆。")
+                    appendLine("要求：content 用一句话概括、去除重复信息；importance 给 0~1 的重要性评分；")
+                    appendLine("keywords 给 3~8 个以后能检索到这条记忆的关键词。")
+                    appendLine("只输出一个 JSON 对象，不要输出任何其他文字，格式：")
+                    appendLine("""{"content":"...","importance":0.x,"keywords":["...","..."]}""")
                     appendLine()
-                    appendLine("对话：")
-                    appendLine(conversationText)
+                    appendLine("短期记忆：")
+                    append(itemsText)
                 }
 
                 val requestBody = ApiRequest.chatCompletion(
@@ -123,127 +149,49 @@ class MemoryService(
                     messages = listOf(
                         ApiRequest.textMessage(
                             "system",
-                            "你是一个记忆提取助手。请从对话中提取需要长期记住的关键信息，输出简洁的一句话摘要。"
+                            "你是一个记忆摘要助手，只输出要求的 JSON 对象，不加任何说明文字。"
                         ),
                         ApiRequest.textMessage("user", prompt)
                     ),
                     temperature = 0.3,
-                    maxTokens = 200
+                    maxTokens = 300
                 )
 
                 val response = client.chatCompletion(requestBody)
-
-                val summary = ApiResponse.chatCompletionContent(response) ?: return@withContext null
-                if (summary.length < 10) return@withContext null
+                val raw = ApiResponse.chatCompletionContent(response) ?: return@withContext null
+                val result = parseSummaryResult(raw) ?: return@withContext null
+                if (result.content.isBlank()) return@withContext null
 
                 val item = MemoryItem(
-                    id = UUID.randomUUID().toString(),
-                    content = summary,
+                    id = MemoryItem.newId(),
+                    content = result.content,
                     type = MemoryType.LONG_TERM,
-                    importance = 0.7f,
-                    tags = listOf("auto-summary")
+                    importance = result.importance.coerceIn(0f, 1f),
+                    keywords = result.keywords.take(8)
                 )
-
                 repository.save(item)
-                Log.i(TAG, "Long-term memory created (${summary.length} chars)")
+                pending.forEach { repository.delete(it.id) }
+                Log.i(TAG, "Summarized ${pending.size} short-term memories into one long-term memory")
                 item
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to summarize conversation", e)
+                Log.w(TAG, "Failed to summarize short-term memories", e)
                 null
             }
         }
     }
 
-    /**
-     * 合并相似 / 重复的记忆条目。
-     */
-    suspend fun consolidate() {
-        val all = repository.getAll()
-        if (all.size < 2) return
-
-        val groups = mutableMapOf<String, MutableList<MemoryItem>>()
-
-        // 按标签分组
-        for (item in all) {
-            val key = item.tags.sorted().joinToString(",")
-            groups.getOrPut(key) { mutableListOf() }.add(item)
+    /** 从模型输出中提取第一个 JSON 对象（容忍模型在 JSON 前后多写的说明文字）。 */
+    private fun parseSummaryResult(raw: String): SummaryResult? {
+        val start = raw.indexOf('{')
+        val end = raw.lastIndexOf('}')
+        if (start < 0 || end <= start) return null
+        return try {
+            json.decodeFromString<SummaryResult>(raw.substring(start, end + 1))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse summary result", e)
+            null
         }
-
-        for ((_, items) in groups) {
-            if (items.size <= 1) continue
-
-            // 内容相似度检测（简单版：前缀 / 包含匹配）
-            val merged = mutableListOf<MemoryItem>()
-            val used = mutableSetOf<String>()
-
-            for (i in items.indices) {
-                if (items[i].id in used) continue
-                val similar = mutableListOf(items[i])
-                for (j in i + 1 until items.size) {
-                    if (items[j].id in used) continue
-                    if (isSimilar(items[i].content, items[j].content)) {
-                        similar.add(items[j])
-                        used.add(items[j].id)
-                    }
-                }
-                if (similar.size > 1) {
-                    // 合并：保留最重要的属性
-                    val mergedItem = MemoryItem(
-                        id = UUID.randomUUID().toString(),
-                        content = similar.maxByOrNull { it.content.length }?.content ?: items[i].content,
-                        type = MemoryType.LONG_TERM,
-                        importance = (similar.map { it.importance }.average()).toFloat().coerceIn(0f, 1f),
-                        accessCount = similar.sumOf { it.accessCount },
-                        tags = similar.flatMap { it.tags }.distinct(),
-                        sourceMessageId = similar.firstOrNull { it.sourceMessageId != null }?.sourceMessageId
-                    )
-                    // 删除旧条目，保存合并后的
-                    similar.forEach { repository.delete(it.id) }
-                    repository.save(mergedItem)
-                    Log.d(TAG, "Consolidated ${similar.size} memories into one")
-                }
-                used.add(items[i].id)
-            }
-        }
-    }
-
-    // ── 内部工具 ──────────────────────────────────────
-
-    private fun calculateImportance(text: String): Float {
-        // 关键词加分
-        val importantKeywords = listOf(
-            "名字", "叫", "喜欢", "讨厌", "最爱", "家住", "工作",
-            "生日", "年龄", "name", "like", "love", "hate", "live"
-        )
-        val matchCount = importantKeywords.count { text.contains(it, ignoreCase = true) }
-        val base = 0.3f
-        val bonus = (matchCount.toFloat() * 0.15f).coerceAtMost(0.6f)
-        return (base + bonus).coerceIn(0f, 1f)
-    }
-
-    private fun extractTags(text: String): List<String> {
-        val tags = mutableListOf<String>()
-        val tagKeywords = mapOf(
-            "名字" to "name", "叫" to "name",
-            "喜欢" to "preference", "讨厌" to "preference",
-            "工作" to "work", "家住" to "location",
-            "生日" to "birthday", "年龄" to "age",
-            "宠物" to "pet", "游戏" to "game",
-            "音乐" to "music", "电影" to "movie"
-        )
-        for ((keyword, tag) in tagKeywords) {
-            if (text.contains(keyword, ignoreCase = true) && tag !in tags) {
-                tags.add(tag)
-            }
-        }
-        return tags
-    }
-
-    private fun isSimilar(a: String, b: String): Boolean {
-        val short = if (a.length <= b.length) a else b
-        val long = if (a.length > b.length) a else b
-        return short.length > 10 && long.contains(short.take(30))
     }
 }

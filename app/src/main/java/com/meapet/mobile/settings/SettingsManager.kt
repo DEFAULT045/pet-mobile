@@ -63,6 +63,7 @@ class SettingsManager(context: Context) {
     private val KEY_MAX_TOKENS = intPreferencesKey(SettingsKeys.MAX_TOKENS)
     private val KEY_ENABLE_MEMORY = booleanPreferencesKey(SettingsKeys.ENABLE_MEMORY)
     private val KEY_ENABLE_AUTO_SUMMARY = booleanPreferencesKey(SettingsKeys.ENABLE_AUTO_SUMMARY)
+    private val KEY_SUMMARY_INTERVAL = intPreferencesKey(SettingsKeys.SUMMARY_INTERVAL)
     private val KEY_SYSTEM_PROMPT = stringPreferencesKey(SettingsKeys.SYSTEM_PROMPT)
     private val KEY_THEME_MODE = stringPreferencesKey(SettingsKeys.THEME_MODE)
     private val KEY_ENABLE_DYNAMIC_COLOR = booleanPreferencesKey(SettingsKeys.ENABLE_DYNAMIC_COLOR)
@@ -106,6 +107,11 @@ class SettingsManager(context: Context) {
         prefs[KEY_ENABLE_AUTO_SUMMARY] ?: SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY
     }
 
+    /** 摘要轮次流（每隔多少轮对话触发一次短期记忆摘要）。 */
+    val summaryIntervalFlow: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[KEY_SUMMARY_INTERVAL] ?: SettingsKeys.Defaults.SUMMARY_INTERVAL
+    }
+
     /** System prompt 流。 */
     val systemPromptFlow: Flow<String> = dataStore.data.map { prefs ->
         prefs[KEY_SYSTEM_PROMPT] ?: SettingsKeys.Defaults.SYSTEM_PROMPT
@@ -145,6 +151,7 @@ class SettingsManager(context: Context) {
     fun getSystemPrompt(): String = currentPrefs()[KEY_SYSTEM_PROMPT] ?: SettingsKeys.Defaults.SYSTEM_PROMPT
     fun isMemoryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY
     fun isAutoSummaryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_AUTO_SUMMARY] ?: SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY
+    fun getSummaryInterval(): Int = currentPrefs()[KEY_SUMMARY_INTERVAL] ?: SettingsKeys.Defaults.SUMMARY_INTERVAL
 
     // ── 写入方法 ──────────────────────────────────────
     // edit 返回写入后的最新快照，随手更新缓存，保证同步 getter 读己之写
@@ -177,6 +184,10 @@ class SettingsManager(context: Context) {
 
     suspend fun setEnableAutoSummary(enabled: Boolean) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_ENABLE_AUTO_SUMMARY] = enabled }
+    }
+
+    suspend fun setSummaryInterval(interval: Int) {
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_SUMMARY_INTERVAL] = interval }
     }
 
     suspend fun setSystemPrompt(prompt: String) {

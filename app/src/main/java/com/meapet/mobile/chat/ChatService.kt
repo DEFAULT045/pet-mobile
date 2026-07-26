@@ -6,6 +6,7 @@ import com.meapet.mobile.client.model.ApiRequest
 import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.framework.AppConfig
 import com.meapet.mobile.memory.MemoryManager
+import com.meapet.mobile.memory.MemoryOpsProtocol
 import com.meapet.mobile.settings.SettingsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -106,19 +107,20 @@ class ChatService(
                         IllegalStateException("API 响应中没有有效的回复内容")
                     )
                 }
+                // 6b) 剥离模型附在回复末尾的记忆协议块（对用户不可见，见 MemoryOpsProtocol）
+                val (visibleReply, memoryOps) = MemoryOpsProtocol.extract(assistantContent)
                 val assistantMessage = ChatMessage(
                     role = ChatRole.assistant,
-                    content = assistantContent
+                    content = visibleReply
                 )
                 conversationManager.addMessage(assistantMessage)
 
-                // 7) 事后处理：记忆提取/摘要转后台，不阻塞本次回复返回
-                //   （每 N 轮的自动摘要是一次额外 LLM 请求，同步等它会让 UI
-                //     在拿到回复后仍长时间显示加载中）
+                // 7) 事后处理：应用记忆操作/触发摘要转后台，不阻塞本次回复返回
+                //   （摘要是一次额外 LLM 请求，同步等它会让 UI 在拿到回复后仍长时间显示加载中）
                 memoryManager?.let { mm ->
                     postProcessScope.launch {
                         try {
-                            mm.onExchangeComplete(content, assistantContent)
+                            mm.onExchangeComplete(memoryOps)
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -127,7 +129,7 @@ class ChatService(
                     }
                 }
 
-                Log.d(TAG, "Response received (${assistantContent.length} chars)")
+                Log.d(TAG, "Response received (${visibleReply.length} chars)")
                 Result.success(userMessage to assistantMessage)
 
             } catch (e: CancellationException) {
@@ -160,10 +162,6 @@ class ChatService(
 
     /** 获取当前会话历史。 */
     fun getHistory(): List<ChatMessage> = conversationManager.getMessages()
-
-    /** 获取最近的消息交换对（用于记忆系统）。 */
-    fun getRecentExchanges(count: Int = 10): List<Pair<String, String>> =
-        conversationManager.getRecentExchanges(count)
 
     /** 清除历史。 */
     fun clearHistory() {

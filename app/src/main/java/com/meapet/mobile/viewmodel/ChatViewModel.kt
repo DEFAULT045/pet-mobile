@@ -8,10 +8,12 @@ import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.chat.ChatService
 import com.meapet.mobile.chat.ChatUiState
+import com.meapet.mobile.chat.MemoryDialogUi
 import com.meapet.mobile.chat.UpdateNoticeUi
 import com.meapet.mobile.framework.MeaPetApplication
 import com.meapet.mobile.live2d.Live2dManager
 import com.meapet.mobile.memory.MemoryManager
+import com.meapet.mobile.memory.MemoryStats
 import com.meapet.mobile.update.UpdateCheckResult
 import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.Job
@@ -55,6 +57,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val existingMessages = chatService.getHistory()
         if (existingMessages.isNotEmpty()) {
             _state.update { it.copy(messages = existingMessages) }
+        }
+
+        // 等启动预热（磁盘加载会话历史/记忆）完成后刷新消息列表：
+        // ViewModel 往往先于异步加载完成而创建，此时 getHistory() 还是空的
+        viewModelScope.launch {
+            container.warmUpJob.join()
+            val restored = chatService.getHistory()
+            if (restored.isNotEmpty()) {
+                _state.update { current ->
+                    // 保留加载期间产生的新消息（按 id 去重，恢复的历史在前）
+                    val currentIds = restored.map { it.id }.toSet()
+                    val newDuringLoad = current.messages.filter { it.id !in currentIds }
+                    current.copy(messages = restored + newDuringLoad)
+                }
+            }
         }
 
         // 监听 Live2D 触摸分区事件→添加系统消息气泡，超时后自动移除
@@ -108,6 +125,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             is ChatEvent.UpdateInput -> updateInput(event.text)
             is ChatEvent.ClearConversation -> clearConversation()
             is ChatEvent.ClearMemory -> clearMemory()
+            is ChatEvent.ShowMemories -> showMemories()
+            is ChatEvent.DismissMemories -> dismissMemories()
+            is ChatEvent.DeleteMemory -> deleteMemory(event.id)
             is ChatEvent.RetryLastMessage -> retryLastMessage()
             is ChatEvent.DismissError -> dismissError()
             is ChatEvent.DismissMemoryInfo -> dismissMemoryInfo()
@@ -218,7 +238,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             memoryManager?.clearAll()
             _state.update {
-                it.copy(memoryContextInfo = "记忆已全部清除")
+                it.copy(
+                    memoryContextInfo = "记忆已全部清除",
+                    // 对话框开着时同步清空列表
+                    memoryDialog = it.memoryDialog?.copy(
+                        memories = emptyList(),
+                        stats = MemoryStats()
+                    )
+                )
+            }
+        }
+    }
+
+    /** 打开记忆查看对话框：拉取全部记忆与统计。 */
+    private fun showMemories() {
+        val mm = memoryManager ?: return
+        viewModelScope.launch {
+            val memories = mm.getAllMemories()
+            val stats = mm.getStats()
+            _state.update {
+                it.copy(
+                    memoryDialog = MemoryDialogUi(
+                        memories = memories,
+                        stats = stats,
+                        isMemoryEnabled = mm.isMemoryEnabled()
+                    )
+                )
+            }
+        }
+    }
+
+    private fun dismissMemories() {
+        _state.update { it.copy(memoryDialog = null) }
+    }
+
+    /** 删除单条记忆并刷新对话框列表。 */
+    private fun deleteMemory(id: String) {
+        val mm = memoryManager ?: return
+        viewModelScope.launch {
+            mm.delete(id)
+            _state.update { current ->
+                val dialog = current.memoryDialog ?: return@update current
+                current.copy(
+                    memoryDialog = dialog.copy(
+                        memories = dialog.memories.filterNot { it.id == id },
+                        stats = mm.getStats()
+                    )
+                )
             }
         }
     }

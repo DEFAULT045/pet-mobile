@@ -19,7 +19,7 @@ class MemorySerializationTest {
                 lastAccessedAt = 1234567999L,
                 accessCount = 3,
                 sourceMessageId = "msg-42",
-                tags = listOf("name", "带\"引号\"的标签")
+                keywords = listOf("name", "带\"引号\"的关键词")
             ),
             MemoryItem(
                 id = "id-2",
@@ -32,7 +32,7 @@ class MemorySerializationTest {
                 content = "emoji 测试 🐱🎉 猫娘喵~ ㊙️",
                 type = MemoryType.SHORT_TERM,
                 sourceMessageId = null,
-                tags = emptyList()
+                keywords = emptyList()
             )
         )
 
@@ -59,7 +59,7 @@ class MemorySerializationTest {
     fun decodeIgnoresUnknownKeys() {
         val json = """[{"id":"x","content":"c","type":"CORE_TRAIT","importance":0.8,
             "createdAt":1,"lastAccessedAt":2,"accessCount":5,"sourceMessageId":null,
-            "tags":["a"],"futureField":"ignored"}]"""
+            "keywords":["a"],"futureField":"ignored"}]"""
         val decoded = MemorySerialization.decode(json)
         assertEquals(1, decoded.size)
         assertEquals(MemoryType.CORE_TRAIT, decoded[0].type)

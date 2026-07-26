@@ -16,8 +16,8 @@ android {
         applicationId = "com.meapet.mobile"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.1.0"
+        versionCode = 5
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -39,6 +39,12 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    testOptions {
+        unitTests {
+            // JVM 单测中 android.util.Log 等桩方法返回默认值而非抛异常
+            isReturnDefaultValues = true
+        }
     }
 }
 
@@ -80,4 +86,5 @@ dependencies {
     // 测试所需
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockito.kotlin)
 }

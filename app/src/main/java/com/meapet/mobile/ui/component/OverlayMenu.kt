@@ -41,6 +41,7 @@ import androidx.compose.ui.window.PopupProperties
 fun OverlayMenu(
     onSettings: () -> Unit = {},
     onClearConversation: () -> Unit = {},
+    onShowMemories: () -> Unit = {},
     onToggleOverlay: () -> Unit = {},
     onAbout: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -111,6 +112,12 @@ fun OverlayMenu(
                             text = { Text("清除对话", style = MaterialTheme.typography.bodyMedium) },
                             onClick = { menuExpanded = false; onClearConversation() },
                             leadingIcon = { Text("🗨", style = MaterialTheme.typography.bodyMedium) }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("查看记忆", style = MaterialTheme.typography.bodyMedium) },
+                            onClick = { menuExpanded = false; onShowMemories() },
+                            leadingIcon = { Text("🧠", style = MaterialTheme.typography.bodyMedium) }
                         )
                         HorizontalDivider()
                         DropdownMenuItem(

@@ -12,6 +12,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-07-26
+
+### Added
+
+- **聊天记录持久化** — 新增 `ConversationStore`，会话历史随消息变更异步落盘（合并写 + 原子替换 + 损坏文件 `.corrupt` 备份），启动时恢复到界面。此前是纯内存的，强杀进程重开必然清空。
+- **「查看记忆」界面** — 首页三点菜单新增入口，展示记忆统计与条目列表（内容、类型、重要性、关键词），支持单条删除与「清除全部」（二次确认）。
+- **摘要轮次可调** — 设置页「记忆系统」新增滑杆，可设定每隔多少轮触发一次摘要（3~30，默认 10）；关闭「自动摘要」时置灰。此前硬编码 10 轮。
+
+### Changed
+
+- **记忆创建改由大模型自主决定** — 移除程序侧启发式提取（按字数阈值 + 关键词表打分，中文日常聊天几乎触发不到）。新增 `MemoryOpsProtocol`：模型在回复末尾附加 ` ```memory-ops ` 代码块，声明本轮 `create` / `update` / `delete` 哪些记忆及其类型、重要性、关键词；该块解析后从回复中剥离，用户不可见。全程容错，块缺失 / JSON 畸形 / 围栏未闭合一律静默跳过，不影响聊天回复。未采用 function calling——不少 OpenAI 兼容中转对其支持不稳定，且要多一次往返。
+- **记忆检索改为匹配模型给出的关键词** — 移除程序侧切词 / CJK 二元组匹配。原实现按空白与标点切词，中文整句被当成单个关键词，`contains` 几乎永不命中，磁盘上的记忆从来没被注入过上下文。
+- **事实与特质永不自动淘汰** — `FACTUAL` / `CORE_TRAIT` 排除出容量淘汰池（`maxItems` 仅约束短期 + 长期），并每轮全量注入 system prompt（带 id 供模型引用）；短期 / 长期仍按关键词匹配注入。手动删除不受影响。
+- **摘要改为消费短期记忆** — 不再发送原始对话文本，改为把已攒下的短期记忆压缩成一条长期记忆并删除参与摘要的短期条目；失败时原样保留，下次再试。
+- **`MemoryItem.tags` → `keywords`** — 标签字段替换为检索关键词，按标签分组的相似度去重（`consolidate`）一并移除——模型每轮能看到全部事实与特质，重复时会自己走 `update`。
+- **记忆 id 改为短 id** — 完整 UUID 改为 `mem_` + 8 位随机字符，省 token 且模型抄写更不易出错。
+- **记忆链路日志** — 各决策点补充 Logcat（是否注入协议、是否解析到块、失败原因、落库结果），`adb logcat -s MemoryOpsProtocol MemoryManager MemoryService` 即可排查；仅记长度与计数，对话内容不入日志。
+- **死代码清理** — 移除 `ChatService` / `ConversationManager` 中已无调用方的 `getRecentExchanges()`、`getContextText()`，以及 `MemoryService` 的 `extractFromExchange` / `calculateImportance` / `extractTags` / `consolidate` / `isSimilar`。
+- **版本号升至 `1.2.0`**（versionCode 5）。
+
+### Fixed
+
+- **启动加载与首次写入竞态导致记忆被整体覆盖** — 异步加载未完成前若先发生一次保存，会把只含新条目的内存列表写回文件，旧记忆全丢。改为惰性加载兜底，读盘必定先于首次写盘。这是「记忆大退就没了」中真正丢数据的一环。
+- **ViewModel 早于异步加载完成导致界面空白** — `AppContainer` 暴露 `warmUpJob`，`ChatViewModel` 等待完成后刷新消息列表，并按 id 去重保留加载期间的新消息。
+- **`ConversationManager` 线程安全** — 启动恢复在 IO 线程执行，与发送链路并发访问消息列表，所有读写方法改为加锁串行化。
+- **`MemoryRepository` 可测试性** — 构造参数由 `Context` 改为 `filesDir: File`，可在纯 JVM 单测中验证持久化、淘汰与检索。
+
+### Notes
+
+- **老数据会有降级**：已存在的旧记忆没有 `keywords`（旧 `tags` 静默丢弃），因此旧的短期 / 长期记忆无法被检索到；事实类不受影响，仍全量注入。建议升级后在「查看记忆」中清空重来。
+- 本版本含用户可见新功能与记忆系统行为重构，聊天与 API 配置流程向后兼容，按语义化版本升 **MINOR**。
+- 新增测试依赖 `mockito-kotlin`（仅 `testImplementation`，不进入 APK）。
+
+---
+
 ## [1.1.0] - 2026-07-25
 
 ### Added

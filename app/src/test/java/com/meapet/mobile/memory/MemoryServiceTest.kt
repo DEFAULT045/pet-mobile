@@ -1,0 +1,243 @@
+package com.meapet.mobile.memory
+
+import com.meapet.mobile.client.HttpResponse
+import com.meapet.mobile.client.OpenAiCompatibleClient
+import com.meapet.mobile.client.test.FakeHttpClientEngine
+import com.meapet.mobile.framework.AppConfig
+import com.meapet.mobile.settings.SettingsManager
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.whenever
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * MemoryService 的 JVM 单元测试。
+ *
+ * [SettingsManager] 是持有真实 Android [android.content.Context]/DataStore 的具体类，
+ * 无法在纯 JVM 测试里直接构造，用 mockito-kotlin 打桩即可（不涉及生产代码改动）。
+ */
+class MemoryServiceTest {
+
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private fun fakeSettings(
+        memoryEnabled: Boolean = true,
+        autoSummaryEnabled: Boolean = true
+    ): SettingsManager {
+        val sm = mock<SettingsManager>()
+        whenever(sm.isMemoryEnabled()).thenReturn(memoryEnabled)
+        whenever(sm.isAutoSummaryEnabled()).thenReturn(autoSummaryEnabled)
+        whenever(sm.getModel()).thenReturn("test-model")
+        return sm
+    }
+
+    private fun service(
+        repository: MemoryRepository,
+        settingsManager: SettingsManager = fakeSettings(),
+        client: OpenAiCompatibleClient? = null
+    ) = MemoryService(
+        repository = repository,
+        summarizationClient = { client },
+        settingsManager = settingsManager,
+        config = AppConfig.DEFAULT
+    )
+
+    /** 构造一个形如 `{"choices":[{"message":{"content": assistantContent}}]}` 的假响应体。 */
+    private fun fakeChatResponse(assistantContent: String): String {
+        val obj: JsonObject = buildJsonObject {
+            putJsonArray("choices") {
+                addJsonObject {
+                    putJsonObject("message") {
+                        put("content", assistantContent)
+                    }
+                }
+            }
+        }
+        return Json.encodeToString(JsonObject.serializer(), obj)
+    }
+
+    private fun fakeClient(assistantContent: String): OpenAiCompatibleClient {
+        val engine = FakeHttpClientEngine {
+            HttpResponse(
+                statusCode = 200,
+                body = fakeChatResponse(assistantContent).encodeToByteArray(),
+                contentType = "application/json"
+            )
+        }
+        return OpenAiCompatibleClient(apiKey = "k", baseUrl = "https://example.com/v1", engine = engine)
+    }
+
+    // ── applyOps ──────────────────────────────────────
+
+    @Test
+    fun applyOpsCreatesNewMemory() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        val svc = service(repo)
+
+        svc.applyOps(
+            listOf(
+                MemoryOpsProtocol.MemoryOp.Create(
+                    type = MemoryType.FACTUAL,
+                    content = "用户叫小明",
+                    importance = 0.9f,
+                    keywords = listOf("小明", "名字")
+                )
+            )
+        )
+
+        val all = repo.getAll()
+        assertEquals(1, all.size)
+        assertEquals("用户叫小明", all.single().content)
+        assertEquals(MemoryType.FACTUAL, all.single().type)
+    }
+
+    @Test
+    fun applyOpsUpdatesExistingMemoryInPlace() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(
+            MemoryItem(
+                id = "mem_abc",
+                content = "用户叫小明",
+                type = MemoryType.FACTUAL,
+                keywords = listOf("小明")
+            )
+        )
+        val svc = service(repo)
+
+        svc.applyOps(
+            listOf(
+                MemoryOpsProtocol.MemoryOp.Update(
+                    targetId = "mem_abc",
+                    type = MemoryType.FACTUAL,
+                    content = "用户叫大明",
+                    importance = 0.9f,
+                    keywords = listOf("大明")
+                )
+            )
+        )
+
+        val all = repo.getAll()
+        assertEquals(1, all.size, "update 不应产生新条目")
+        assertEquals("mem_abc", all.single().id)
+        assertEquals("用户叫大明", all.single().content)
+    }
+
+    @Test
+    fun applyOpsUpdateFallsBackToCreateWhenTargetMissing() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        val svc = service(repo)
+
+        svc.applyOps(
+            listOf(
+                MemoryOpsProtocol.MemoryOp.Update(
+                    targetId = "mem_does_not_exist",
+                    type = MemoryType.FACTUAL,
+                    content = "过期id的更新",
+                    importance = 0.7f,
+                    keywords = listOf("a")
+                )
+            )
+        )
+
+        val all = repo.getAll()
+        assertEquals(1, all.size, "targetId 不存在时应退化为新建，而不是丢弃模型意图")
+        assertEquals("过期id的更新", all.single().content)
+    }
+
+    @Test
+    fun applyOpsDeletesMemory() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(MemoryItem(id = "mem_x", content = "待删除"))
+        val svc = service(repo)
+
+        svc.applyOps(listOf(MemoryOpsProtocol.MemoryOp.Delete(targetId = "mem_x")))
+
+        assertTrue(repo.getAll().isEmpty())
+    }
+
+    // ── summarizeShortTermMemories ─────────────────────
+
+    @Test
+    fun summarizeReturnsNullWhenNoShortTermMemories() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        val svc = service(repo)
+
+        assertNull(svc.summarizeShortTermMemories())
+    }
+
+    @Test
+    fun summarizeReturnsNullWhenMemoryDisabled() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(MemoryItem(id = "s1", content = "短期", type = MemoryType.SHORT_TERM))
+        val svc = service(repo, fakeSettings(memoryEnabled = false))
+
+        assertNull(svc.summarizeShortTermMemories())
+        assertEquals(1, repo.getByType(MemoryType.SHORT_TERM).size, "关闭时短期记忆不应被处理")
+    }
+
+    @Test
+    fun summarizeSuccessDeletesConsumedShortTermAndSavesLongTerm() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(MemoryItem(id = "s1", content = "今天吃了火锅", type = MemoryType.SHORT_TERM))
+        repo.save(MemoryItem(id = "s2", content = "喜欢辣的", type = MemoryType.SHORT_TERM))
+
+        val modelOutput = """{"content":"用户喜欢吃辣，今天吃了火锅","importance":0.6,"keywords":["火锅","辣"]}"""
+        val svc = service(repo, client = fakeClient(modelOutput))
+
+        val result = svc.summarizeShortTermMemories()
+
+        assertEquals("用户喜欢吃辣，今天吃了火锅", result?.content)
+        assertEquals(MemoryType.LONG_TERM, result?.type)
+        assertEquals(listOf("火锅", "辣"), result?.keywords)
+        assertTrue(repo.getByType(MemoryType.SHORT_TERM).isEmpty(), "参与摘要的短期记忆应被删除")
+        assertEquals(1, repo.getByType(MemoryType.LONG_TERM).size)
+    }
+
+    @Test
+    fun summarizeToleratesExtraTextAroundJsonObject() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(MemoryItem(id = "s1", content = "短期A", type = MemoryType.SHORT_TERM))
+
+        val modelOutput = """好的，这是摘要：{"content":"总结内容","importance":0.5,"keywords":["a","b"]} 谢谢"""
+        val svc = service(repo, client = fakeClient(modelOutput))
+
+        val result = svc.summarizeShortTermMemories()
+        assertEquals("总结内容", result?.content)
+    }
+
+    @Test
+    fun summarizeFailureLeavesShortTermMemoriesUntouched() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(MemoryItem(id = "s1", content = "短期A", type = MemoryType.SHORT_TERM))
+
+        val svc = service(repo, client = fakeClient("不是JSON的胡言乱语，没有大括号"))
+
+        val result = svc.summarizeShortTermMemories()
+
+        assertNull(result)
+        assertEquals(1, repo.getByType(MemoryType.SHORT_TERM).size, "解析失败时短期记忆应原样保留")
+    }
+
+    @Test
+    fun summarizeReturnsNullWhenNoClientAvailable() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(MemoryItem(id = "s1", content = "短期A", type = MemoryType.SHORT_TERM))
+        val svc = service(repo, client = null)
+
+        assertNull(svc.summarizeShortTermMemories())
+        assertEquals(1, repo.getByType(MemoryType.SHORT_TERM).size)
+    }
+}

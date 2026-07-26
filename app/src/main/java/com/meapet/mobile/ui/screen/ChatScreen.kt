@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
@@ -61,7 +62,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meapet.mobile.chat.ChatEvent
+import com.meapet.mobile.chat.MemoryDialogUi
 import com.meapet.mobile.live2d.Live2dDelegate
+import com.meapet.mobile.memory.MemoryType
 import com.meapet.mobile.ui.component.ChatBubble
 import com.meapet.mobile.ui.component.ChatInputBar
 import com.meapet.mobile.ui.component.OverlayMenu
@@ -250,6 +253,9 @@ private fun ChatPage(
             onClearConversation = {
                 chatViewModel.onEvent(ChatEvent.ClearConversation)
             },
+            onShowMemories = {
+                chatViewModel.onEvent(ChatEvent.ShowMemories)
+            },
             onSettings = onOpenSettings,
             onAbout = { showAbout = true },
             modifier = Modifier.align(Alignment.TopEnd)
@@ -292,6 +298,16 @@ private fun ChatPage(
                 onDismissUpdateMessage = {
                     chatViewModel.onEvent(ChatEvent.DismissAboutUpdateMessage)
                 }
+            )
+        }
+
+        // ── Layer 6: 记忆查看对话框 ──
+        state.memoryDialog?.let { dialog ->
+            MemoryDialog(
+                dialog = dialog,
+                onDismiss = { chatViewModel.onEvent(ChatEvent.DismissMemories) },
+                onDeleteMemory = { id -> chatViewModel.onEvent(ChatEvent.DeleteMemory(id)) },
+                onClearAll = { chatViewModel.onEvent(ChatEvent.ClearMemory) }
             )
         }
     }
@@ -493,4 +509,142 @@ private fun LinkItem(
                 .firstOrNull()?.let { uriHandler.openUri(it.item) }
         }
     )
+}
+
+/**
+ * 记忆查看对话框：统计 + 条目列表 + 单条删除 + 清除全部（带确认）。
+ */
+@Composable
+private fun MemoryDialog(
+    dialog: MemoryDialogUi,
+    onDismiss: () -> Unit,
+    onDeleteMemory: (String) -> Unit,
+    onClearAll: () -> Unit
+) {
+    var confirmClearAll by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .padding(horizontal = 24.dp, vertical = 48.dp)
+                .widthIn(max = 420.dp)
+                .fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text("Mea 的记忆", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+
+                val stats = dialog.stats
+                Text(
+                    text = if (dialog.isMemoryEnabled) {
+                        "共 ${stats.totalCount} 条 · 短期 ${stats.shortTermCount} · " +
+                            "长期 ${stats.longTermCount} · 事实 ${stats.factualsCount}"
+                    } else {
+                        "记忆功能已关闭（可在设置中开启）"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(6.dp))
+
+                if (dialog.memories.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "还没有记忆喵~\n多和 Mea 聊聊天吧",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp)
+                    ) {
+                        items(items = dialog.memories, key = { it.id }) { memory ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = memory.content,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = buildString {
+                                            append(memoryTypeLabel(memory.type))
+                                            append(" · 重要性 ")
+                                            append((memory.importance * 100).toInt())
+                                            append("%")
+                                            if (memory.keywords.isNotEmpty()) {
+                                                append(" · 关键词: ")
+                                                append(memory.keywords.joinToString(", "))
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                }
+                                TextButton(onClick = { onDeleteMemory(memory.id) }) {
+                                    Text("删除", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    if (confirmClearAll) {
+                        TextButton(onClick = { confirmClearAll = false; onClearAll() }) {
+                            Text("确认清除？", color = MaterialTheme.colorScheme.error)
+                        }
+                    } else {
+                        TextButton(
+                            onClick = { confirmClearAll = true },
+                            enabled = dialog.memories.isNotEmpty()
+                        ) {
+                            Text("清除全部")
+                        }
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("关闭")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 记忆类型的中文标签。 */
+private fun memoryTypeLabel(type: MemoryType): String = when (type) {
+    MemoryType.SHORT_TERM -> "短期"
+    MemoryType.LONG_TERM -> "长期"
+    MemoryType.CORE_TRAIT -> "特质"
+    MemoryType.FACTUAL -> "事实"
 }

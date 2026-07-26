@@ -7,6 +7,7 @@ import com.meapet.mobile.client.KtorHttpClientEngine
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.chat.ChatService
 import com.meapet.mobile.chat.ConversationManager
+import com.meapet.mobile.chat.ConversationStore
 import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.memory.MemoryRepository
 import com.meapet.mobile.memory.MemoryService
@@ -14,7 +15,9 @@ import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 
 /**
@@ -60,14 +63,22 @@ class AppContainer(
             _apiClient ?: createClient().also { _apiClient = it }
         }
 
+    /** 会话历史持久化存储。 */
+    val conversationStore: ConversationStore by lazy {
+        ConversationStore(context.filesDir, applicationScope)
+    }
+
     /** 会话历史管理器。 */
     val conversationManager: ConversationManager by lazy {
-        ConversationManager(maxSize = config.maxHistoryMessages)
+        ConversationManager(
+            maxSize = config.maxHistoryMessages,
+            store = conversationStore
+        )
     }
 
     /** 记忆存储器。 */
     val memoryRepository: MemoryRepository by lazy {
-        MemoryRepository(context)
+        MemoryRepository(context.filesDir, maxItems = config.maxMemoryItems)
     }
 
     /** 记忆业务服务。 */
@@ -85,7 +96,8 @@ class AppContainer(
         MemoryManager(
             service = memoryService,
             repository = memoryRepository,
-            settingsManager = settingsManager
+            settingsManager = settingsManager,
+            config = config
         )
     }
 
@@ -126,10 +138,22 @@ class AppContainer(
 
     // ── 启动预热 ──────────────────────────────────────
 
-    /** 启动时异步加载持久化的记忆数据（不阻塞主线程）。 */
+    /**
+     * 启动预热任务。[warmUp] 调用后完成记忆 + 会话历史的磁盘加载；
+     * ViewModel 可 `join()` 等待加载完成后刷新 UI。
+     * 未调用 warmUp 时为已完成的空 Job（各仓库有惰性加载兜底，不会丢数据）。
+     */
+    @Volatile
+    var warmUpJob: Job = Job().apply { complete() }
+        private set
+
+    /** 启动时异步加载持久化的记忆与会话历史（不阻塞主线程）。 */
     fun warmUp() {
-        applicationScope.launch(Dispatchers.IO) {
-            memoryRepository.loadFromDisk()
+        warmUpJob = applicationScope.launch(Dispatchers.IO) {
+            listOf(
+                launch { memoryRepository.loadFromDisk() },
+                launch { conversationManager.restore(conversationStore.load()) }
+            ).joinAll()
         }
     }
 

@@ -37,6 +37,7 @@ data class SettingsUiState(
     val systemPrompt: String = SettingsKeys.Defaults.SYSTEM_PROMPT,
     val enableMemory: Boolean = SettingsKeys.Defaults.ENABLE_MEMORY,
     val enableAutoSummary: Boolean = SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY,
+    val summaryInterval: Int = SettingsKeys.Defaults.SUMMARY_INTERVAL,
     val themeMode: String = SettingsKeys.Defaults.THEME_MODE,
     val enableDynamicColor: Boolean = SettingsKeys.Defaults.ENABLE_DYNAMIC_COLOR,
     val colorPreset: String = SettingsKeys.Defaults.COLOR_PRESET,
@@ -66,7 +67,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             maxTokens = settingsManager.getMaxTokens(),
             systemPrompt = settingsManager.getSystemPrompt(),
             enableMemory = settingsManager.isMemoryEnabled(),
-            enableAutoSummary = settingsManager.isAutoSummaryEnabled()
+            enableAutoSummary = settingsManager.isAutoSummaryEnabled(),
+            summaryInterval = settingsManager.getSummaryInterval()
         )
     }
 
@@ -115,6 +117,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             settingsManager.enableAutoSummaryFlow.collect { enabled ->
                 _state.update { it.copy(enableAutoSummary = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsManager.summaryIntervalFlow.collect { interval ->
+                _state.update { it.copy(summaryInterval = interval) }
             }
         }
         viewModelScope.launch {
@@ -190,6 +197,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun updateEnableAutoSummary(enabled: Boolean) {
         viewModelScope.launch { settingsManager.setEnableAutoSummary(enabled) }
+    }
+
+    fun updateSummaryInterval(interval: Int) {
+        viewModelScope.launch { settingsManager.setSummaryInterval(interval) }
     }
 
     fun updateThemeMode(mode: String) {

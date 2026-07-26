@@ -1,5 +1,8 @@
 package com.meapet.mobile.chat
 
+import com.meapet.mobile.memory.MemoryItem
+import com.meapet.mobile.memory.MemoryStats
+
 /**
  * 聊天 UI 状态。
  *
@@ -15,6 +18,7 @@ package com.meapet.mobile.chat
  * @property aboutUpdateMessage 关于页手动检测结果文案
  * @property aboutReleaseUrl 关于页检测有新版本时的发布页 URL
  * @property isCheckingUpdate 关于页是否正在检测更新
+ * @property memoryDialog 记忆查看对话框数据（null = 不显示）
  */
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -25,7 +29,8 @@ data class ChatUiState(
     val updateNotice: UpdateNoticeUi? = null,
     val aboutUpdateMessage: String? = null,
     val aboutReleaseUrl: String? = null,
-    val isCheckingUpdate: Boolean = false
+    val isCheckingUpdate: Boolean = false,
+    val memoryDialog: MemoryDialogUi? = null
 ) {
     val isError: Boolean get() = error != null
     val canSend: Boolean get() = !isLoading && inputText.isNotBlank()
@@ -35,6 +40,13 @@ data class ChatUiState(
 data class UpdateNoticeUi(
     val message: String,
     val url: String
+)
+
+/** 记忆查看对话框数据。 */
+data class MemoryDialogUi(
+    val memories: List<MemoryItem> = emptyList(),
+    val stats: MemoryStats = MemoryStats(),
+    val isMemoryEnabled: Boolean = true
 )
 
 /**
@@ -52,6 +64,15 @@ sealed interface ChatEvent {
 
     /** 清除记忆。 */
     data object ClearMemory : ChatEvent
+
+    /** 打开记忆查看对话框。 */
+    data object ShowMemories : ChatEvent
+
+    /** 关闭记忆查看对话框。 */
+    data object DismissMemories : ChatEvent
+
+    /** 删除单条记忆。 */
+    data class DeleteMemory(val id: String) : ChatEvent
 
     /** 重新发送上一条消息（失败后重试）。 */
     data object RetryLastMessage : ChatEvent
@@ -71,3 +92,4 @@ sealed interface ChatEvent {
     /** 关于页检测结果提示已展示/清除。 */
     data object DismissAboutUpdateMessage : ChatEvent
 }
+

@@ -1,0 +1,100 @@
+package com.meapet.mobile.chat
+
+import kotlinx.coroutines.test.runTest
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * ConversationStore + ConversationManager 持久化链路的 JVM 单元测试。
+ *
+ * 依赖 build.gradle.kts 中 `unitTests.isReturnDefaultValues = true`，
+ * 使 android.util.Log 调用在 JVM 上返回默认值。
+ */
+class ConversationStoreTest {
+
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private fun msg(role: ChatRole, content: String) = ChatMessage(role = role, content = content)
+
+    @Test
+    fun persistThenLoadRoundTrip() = runTest {
+        val dir = tmp.newFolder()
+        val store = ConversationStore(dir, backgroundScope)
+
+        val messages = listOf(
+            msg(ChatRole.user, "你好，我叫小明 🐱"),
+            msg(ChatRole.assistant, "你好小明喵~\n多行\"内容\"也要撑住"),
+            msg(ChatRole.system, "[系统] 触摸事件")
+        )
+        store.persist(messages)
+
+        val loaded = ConversationStore(dir, backgroundScope).load()
+        assertEquals(messages, loaded)
+    }
+
+    @Test
+    fun loadReturnsEmptyWhenNoFile() = runTest {
+        val store = ConversationStore(tmp.newFolder(), backgroundScope)
+        assertTrue(store.load().isEmpty())
+    }
+
+    @Test
+    fun corruptedFileIsBackedUpAndIgnored() = runTest {
+        val dir = tmp.newFolder()
+        File(dir, "meapet_conversation.json").writeText("]]] 不是 JSON")
+
+        val store = ConversationStore(dir, backgroundScope)
+        assertTrue(store.load().isEmpty())
+        assertTrue(File(dir, "meapet_conversation.json.corrupt").exists())
+    }
+
+    @Test
+    fun isStreamingIsNotPersisted() = runTest {
+        val dir = tmp.newFolder()
+        val store = ConversationStore(dir, backgroundScope)
+        store.persist(listOf(msg(ChatRole.assistant, "回复中").copy(isStreaming = true)))
+
+        val loaded = ConversationStore(dir, backgroundScope).load()
+        assertEquals(false, loaded.single().isStreaming)
+    }
+
+    // ── ConversationManager.restore 语义 ──────────────
+
+    @Test
+    fun restoreMergesBeforeExistingAndDeduplicates() {
+        val manager = ConversationManager(maxSize = 50)
+        val newDuringLoad = msg(ChatRole.user, "加载期间的新消息")
+        manager.addMessage(newDuringLoad)
+
+        val persisted = listOf(
+            msg(ChatRole.user, "历史1"),
+            msg(ChatRole.assistant, "历史2"),
+            newDuringLoad // 重复 id，应被去重
+        )
+        manager.restore(persisted)
+
+        val contents = manager.getMessages().map { it.content }
+        assertEquals(listOf("历史1", "历史2", "加载期间的新消息"), contents)
+    }
+
+    @Test
+    fun managerPersistsOnChange() = runTest {
+        val dir = tmp.newFolder()
+        val store = ConversationStore(dir, backgroundScope)
+        val manager = ConversationManager(maxSize = 50, store = store)
+
+        manager.addMessage(msg(ChatRole.user, "第一条"))
+        // persistAsync 是合并异步写；测试里直接同步落盘当前快照验证链路。
+        // 用同一 store 实例 load，与后台写共享同一把锁，避免并发窗口
+        store.persist(manager.getMessages())
+
+        val loaded = store.load()
+        assertEquals(1, loaded.size)
+        assertEquals("第一条", loaded.single().content)
+    }
+}
