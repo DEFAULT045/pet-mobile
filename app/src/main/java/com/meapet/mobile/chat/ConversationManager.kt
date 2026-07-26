@@ -20,10 +20,12 @@ import android.util.Log
  * 所有读写方法用 [lock] 串行化。
  *
  * @param maxSize 最大保留消息数
+ * @param trimBatch 超限时一次裁掉的条数（见 [trimWindow]）
  * @param store 会话持久化存储（null = 纯内存，不落盘）
  */
 class ConversationManager(
     private val maxSize: Int = 50,
+    private val trimBatch: Int = 1,
     private val store: ConversationStore? = null
 ) {
     private val lock = Any()
@@ -78,28 +80,47 @@ class ConversationManager(
     /**
      * 获取用于 API 请求的消息列表（含 system prompt）。
      *
+     * 消息按「是否每轮都变」分层，尽量让前缀在轮与轮之间保持一致，
+     * 服务端的自动 prefix cache 才有可能命中：
+     * ```
+     * system  : systemPrompt + stableContext   ← 基本不变
+     * 历史消息 ...                              ← 追加式增长（裁剪见 trimWindow）
+     * system  : tailContext                    ← 每轮都变，但压在最尾部
+     * ```
+     *
      * @param systemPrompt 系统提示词
-     * @param contextMemory 记忆上下文文本（拼入 system message）
+     * @param stableContext 轮与轮之间基本不变的上下文，拼进首条 system 消息
+     * @param tailContext 每轮都变的上下文（时间、相关回忆、收尾提醒），
+     *   作为对话历史之后的尾部 system 消息；空则不生成该条
      * @param maxMessages 最大消息数（滑动窗口，从末尾取）
+     * @param memoryOpsEchoTurns 最近多少条助手消息要把 [ChatMessage.memoryOpsBlock] 贴回正文
+     *   （0 = 不贴）。仅影响发给模型的副本，不改动会话历史本身
      */
     fun buildApiMessages(
         systemPrompt: String,
-        contextMemory: String = "",
-        maxMessages: Int = 30
+        stableContext: String = "",
+        tailContext: String = "",
+        maxMessages: Int = 30,
+        memoryOpsEchoTurns: Int = 0
     ): List<ChatMessage> {
         val systemContent = buildString {
             append(systemPrompt)
-            if (contextMemory.isNotBlank()) {
-                append("\n\n$contextMemory")
+            if (stableContext.isNotBlank()) {
+                append("\n\n$stableContext")
             }
         }
 
-        val systemMsg = ChatMessage(role = ChatRole.system, content = systemContent)
         val recentMessages = synchronized(lock) {
             messages.filter { it.role != ChatRole.system }.takeLast(maxMessages)
         }
 
-        return listOf(systemMsg) + recentMessages
+        return buildList {
+            add(ChatMessage(role = ChatRole.system, content = systemContent))
+            addAll(echoMemoryOps(recentMessages, memoryOpsEchoTurns))
+            if (tailContext.isNotBlank()) {
+                add(ChatMessage(role = ChatRole.system, content = tailContext))
+            }
+        }
     }
 
     /** 清除所有消息。 */
@@ -130,22 +151,51 @@ class ConversationManager(
 
     // ── 内部 ──────────────────────────────────────────
 
+    /**
+     * 把最近 [turns] 条助手消息的记忆协议块贴回正文，作为给模型看的格式范例。
+     *
+     * 存进历史的助手消息是剥离过协议块的可见正文，直接发出去等于告诉模型
+     * 「我过去每一轮都没输出这个块」——这份实证比 system prompt 里的要求更有分量，
+     * 一旦漏了一次就会自我强化，越往后越不输出。
+     *
+     * 只贴最近几条而非全部：块本身有体积（几十到上百 token），而模型对邻近轮次的
+     * 模仿最强，全量回贴对长会话是纯浪费。
+     */
+    private fun echoMemoryOps(msgs: List<ChatMessage>, turns: Int): List<ChatMessage> {
+        if (turns <= 0) return msgs
+        val echoIds = msgs.asReversed()
+            .filter { it.role == ChatRole.assistant && !it.memoryOpsBlock.isNullOrBlank() }
+            .take(turns)
+            .mapTo(mutableSetOf()) { it.id }
+        if (echoIds.isEmpty()) return msgs
+        return msgs.map { msg ->
+            if (msg.id in echoIds) msg.copy(content = "${msg.content}\n\n${msg.memoryOpsBlock}") else msg
+        }
+    }
+
     /** 必须在持有 [lock] 时调用。 */
     private fun persistLocked() {
         store?.persistAsync(messages.toList())
     }
 
-    /** 必须在持有 [lock] 时调用。 */
+    /**
+     * 必须在持有 [lock] 时调用。
+     *
+     * 超限时一次裁掉 [trimBatch] 条而非刚好一条：逐条裁剪会让每轮请求的消息前缀
+     * 都往后挪一格，服务端的自动 prefix cache 全程无法命中。批量裁一次，
+     * 之后的 [trimBatch] 轮前缀完全相同。代价是有效窗口在 maxSize-trimBatch..maxSize 间浮动。
+     */
     private fun trimWindow() {
         if (messages.size <= maxSize) return
         val systemMessages = messages.filter { it.role == ChatRole.system }
         val nonSystem = messages.filter { it.role != ChatRole.system }
-        val excess = nonSystem.size - (maxSize - systemMessages.size)
+        val budget = (maxSize - systemMessages.size - trimBatch).coerceAtLeast(1)
+        val excess = nonSystem.size - budget
         if (excess > 0) {
             val trimmed = nonSystem.drop(excess)
             messages.clear()
             messages.addAll(systemMessages + trimmed)
-            Log.d(TAG, "Window trimmed: removed $excess messages")
+            Log.d(TAG, "Window trimmed: removed $excess messages (batch=$trimBatch)")
         }
     }
 }

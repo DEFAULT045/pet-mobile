@@ -72,6 +72,7 @@ class AppContainer(
     val conversationManager: ConversationManager by lazy {
         ConversationManager(
             maxSize = config.maxHistoryMessages,
+            trimBatch = config.historyTrimBatch,
             store = conversationStore
         )
     }

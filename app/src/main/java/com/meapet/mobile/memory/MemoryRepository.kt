@@ -99,14 +99,23 @@ class MemoryRepository(
     }
 
     /**
-     * 获取全部事实（FACTUAL）+ 特质（CORE_TRAIT），按创建时间排序。
+     * 获取事实（FACTUAL）+ 特质（CORE_TRAIT），供每轮注入 system prompt
+     * （相当于固定人设表，不做关键词过滤，见 [MemoryManager.buildContext]）。
      *
-     * 这两类永不自动淘汰，每轮都应全量注入 system prompt（相当于固定人设表），
-     * 不做关键词过滤——见 [MemoryManager.buildContext]。
+     * 这两类永不自动淘汰，条数只增不减，因此注入时必须封顶：超过 [maxCount] 时
+     * 按重要性取前 N。**只影响注入**，存储与「查看记忆」界面仍是全量。
+     *
+     * 返回顺序固定按 [MemoryItem.createdAt] 升序——注入内容越稳定，
+     * 服务端 prefix cache 越容易命中。
      */
-    suspend fun getPersonaFacts(): List<MemoryItem> = mutex.withLock {
+    suspend fun getPersonaFacts(maxCount: Int = Int.MAX_VALUE): List<MemoryItem> = mutex.withLock {
         ensureLoadedLocked()
-        memories.filter { isPermanent(it) }.sortedBy { it.createdAt }
+        val all = memories.filter { isPermanent(it) }
+        val kept = if (all.size <= maxCount) all else {
+            Log.d(TAG, "Persona facts capped: ${all.size} -> $maxCount for injection")
+            all.sortedByDescending { it.importance }.take(maxCount)
+        }
+        kept.sortedBy { it.createdAt }
     }
 
     /** 删除指定记忆。 */
@@ -114,6 +123,20 @@ class MemoryRepository(
         mutex.withLock {
             ensureLoadedLocked()
             memories.removeAll { it.id == id }
+            persistLocked()
+        }
+    }
+
+    /**
+     * 批量删除。整批只落盘一次——摘要一次要吃掉几十条短期记忆，
+     * 逐条 [delete] 会把整个记忆库重写同样多次。
+     */
+    suspend fun deleteAll(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        mutex.withLock {
+            ensureLoadedLocked()
+            val set = ids.toSet()
+            if (!memories.removeAll { it.id in set }) return@withLock
             persistLocked()
         }
     }

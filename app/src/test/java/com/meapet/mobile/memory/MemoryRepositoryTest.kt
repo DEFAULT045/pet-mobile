@@ -190,4 +190,53 @@ class MemoryRepositoryTest {
         val reloaded = MemoryRepository(dir).findById("hit")
         assertEquals(2, reloaded?.accessCount)
     }
+
+    @Test
+    fun getPersonaFactsCapsByImportanceButKeepsCreationOrder() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        // 故意让创建顺序与重要性顺序相反
+        repo.save(item("old", "最早但很重要", importance = 0.9f, type = MemoryType.FACTUAL))
+        repo.save(item("mid", "中等", importance = 0.5f, type = MemoryType.CORE_TRAIT))
+        repo.save(item("new", "最新但不重要", importance = 0.1f, type = MemoryType.FACTUAL))
+
+        val kept = repo.getPersonaFacts(maxCount = 2)
+
+        assertEquals(listOf("old", "mid"), kept.map { it.id }, "按重要性取前 2，输出仍按创建时间")
+        assertEquals(3, repo.getAll().size, "封顶只影响注入，不影响存储")
+    }
+
+    @Test
+    fun getPersonaFactsWithoutCapReturnsAll() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(item("a", "甲", type = MemoryType.FACTUAL))
+        repo.save(item("b", "乙", type = MemoryType.CORE_TRAIT))
+
+        assertEquals(2, repo.getPersonaFacts().size)
+    }
+
+    // ── 批量删除 ──────────────────────────────────────
+
+    @Test
+    fun deleteAllRemovesOnlyGivenIdsAndPersists() = runTest {
+        val dir = tmp.newFolder()
+        val repo = MemoryRepository(dir)
+        repo.save(item("a", "甲"))
+        repo.save(item("b", "乙"))
+        repo.save(item("c", "丙"))
+
+        repo.deleteAll(listOf("a", "c", "不存在的id"))
+
+        assertEquals(listOf("b"), MemoryRepository(dir).getAll().map { it.id }, "删除应落盘")
+    }
+
+    @Test
+    fun deleteAllWithEmptyIdsIsNoOp() = runTest {
+        val dir = tmp.newFolder()
+        val repo = MemoryRepository(dir)
+        repo.save(item("a", "甲"))
+
+        repo.deleteAll(emptyList())
+
+        assertEquals(1, repo.getAll().size)
+    }
 }

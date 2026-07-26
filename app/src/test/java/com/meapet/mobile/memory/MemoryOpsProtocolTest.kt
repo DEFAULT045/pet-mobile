@@ -3,6 +3,7 @@ package com.meapet.mobile.memory
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class MemoryOpsProtocolTest {
@@ -200,5 +201,32 @@ class MemoryOpsProtocolTest {
         val result = MemoryOpsProtocol.extract(raw)
         assertEquals("正常聊天内容", result.visibleReply)
         assertTrue(result.ops.isEmpty())
+    }
+
+    // ── rawBlock（供下一轮贴回历史当格式范例）────────────
+
+    @Test
+    fun rawBlockKeepsFencedBlockVerbatim() {
+        val block = "```memory-ops\n[{\"op\":\"create\",\"type\":\"SHORT_TERM\",\"content\":\"c\",\"keywords\":[\"k\"]}]\n```"
+        val result = MemoryOpsProtocol.extract("正常聊天内容\n\n$block")
+
+        assertEquals(block, result.rawBlock)
+        assertEquals("正常聊天内容", result.visibleReply)
+    }
+
+    @Test
+    fun rawBlockIsKeptEvenWhenOpsAreEmpty() {
+        // 空数组也要贴回去：模型漏的往往不是内容而是「块本身」，格式范例比内容更重要
+        val block = "```memory-ops\n[]\n```"
+        assertEquals(block, MemoryOpsProtocol.extract("在的喵\n\n$block").rawBlock)
+    }
+
+    @Test
+    fun rawBlockIsNullWhenNoUsableBlock() {
+        assertNull(MemoryOpsProtocol.extract("就是一句普通回复").rawBlock)
+        assertNull(
+            MemoryOpsProtocol.extract("正常聊天内容\n\n```memory-ops\n[{\"op\":\"create\"").rawBlock,
+            "未闭合的块不该被当范例贴回去"
+        )
     }
 }

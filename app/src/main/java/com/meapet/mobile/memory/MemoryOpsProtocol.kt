@@ -63,33 +63,61 @@ object MemoryOpsProtocol {
         data class Delete(val targetId: String) : MemoryOp
     }
 
-    data class ParseResult(val visibleReply: String, val ops: List<MemoryOp>)
+    /**
+     * @property visibleReply 剥离协议块后的可见回复
+     * @property ops 解析出的记忆操作
+     * @property rawBlock 协议块原文（含围栏），供组装下一轮请求时贴回历史；
+     *   未找到块、块未闭合或回退为整段原文时为 null
+     */
+    data class ParseResult(
+        val visibleReply: String,
+        val ops: List<MemoryOp>,
+        val rawBlock: String? = null
+    )
 
     /**
      * 协议说明文本，拼入 system prompt（仅记忆开关开启时调用）。
+     *
+     * 措辞对模型的记录意愿影响极大，这里有三处是踩过坑才写成现在这样的：
+     * 1. 早期写着「闲聊寒暄、临时性的一句话通常不需要记」，且「什么值得记」举的例子全是
+     *    姓名生日这类 FACTUAL——模型据此把绝大多数对话判为不必记，SHORT_TERM 几乎不产出，
+     *    摘要也就永远没有素材。现在默认档位就是 SHORT_TERM，并说明多记无负担。
+     * 2. 用户的人设 prompt 往往带「极简 20-40 字」这类字数与风格约束（默认人设就有），
+     *    模型会把它一并套用到这个代码块上，于是能省则省。必须显式豁免。
+     * 3. 说明写在 system prompt 靠前的位置，离生成点远。[reminder] 会在记忆上下文的末尾
+     *    再顶一句，紧邻对话历史，命中率明显更高。
      */
     fun instructions(): String = """
         【记忆协议】
-        你可以在本轮回复的最后附加一个 ```$FENCE_LANG 代码块，声明要创建/更新/删除哪些记忆。
-        这个代码块不会展示给用户，只供系统解析，正文里绝不要提及它的存在。
-        无论本轮有没有值得记住的内容，都必须输出这个块；没有就输出空数组 []。
+        你必须在每轮回复的最后附加一个 ```$FENCE_LANG 块，声明要创建/更新/删除哪些记忆。
+        它不展示给用户，正文里绝不要提及；它也**不属于你的台词**——人设的字数上限与语气要求
+        一概不适用，不要为了回复简短而省略它或少记几条。
 
-        格式（JSON 数组，每个元素一条操作）：
         ```$FENCE_LANG
-        [{"op":"create","type":"FACTUAL","content":"用户叫小明","importance":0.9,"keywords":["小明","名字"]}]
+        [{"op":"create","type":"SHORT_TERM","content":"用户这周在赶毕业论文，压力很大","importance":0.5,"keywords":["毕业论文","赶论文","压力"]}]
         ```
 
-        字段说明：
-        - op: "create"（新建，缺省默认）/ "update"（更新已有记忆，需 targetId）/ "delete"（删除已有记忆，需 targetId）
-        - type: SHORT_TERM（短期，闲聊细节）/ CORE_TRAIT（性格偏好，长期有效）/ FACTUAL（事实，如姓名生日，长期有效）
-        - content: 一句话概括
-        - importance: 0~1 的重要性评分
-        - keywords: 3~8 个用于以后检索这条记忆的关键词
-        - targetId: 仅 update/delete 需要，引用下文【用户人设】/【相关回忆】里给出的 id
+        - op: create（默认）/ update / delete，后两者需 targetId，引用下文【用户人设】【相关回忆】里的 id
+        - type: SHORT_TERM（**默认档位**，最近或当下的经历、状态、情绪、在忙的事、提到的人和地点）
+          / CORE_TRAIT（稳定的性格与喜好厌恶）/ FACTUAL（姓名、生日、职业等客观事实）
+        - content 写清主语（「用户说明天要去面试」而非「要去面试」）；importance 取 0~1；
+          keywords 给 3~8 个用户以后可能再说出口的词，别用「记忆」「对话」这类空词
 
-        什么值得记：姓名、生日、住址、职业、喜好厌恶、约定好的事情等对用户重要或以后会用到的信息。
-        闲聊寒暄、临时性的一句话通常不需要记。发现之前记错或过时的信息时，用 update 或 delete 修正，不要重复创建。
+        用户只要提到具体的人、事、物、时间或感受，就至少记 1 条 SHORT_TERM，通常 1~3 条。
+        不必纠结重不重要——多记无负担（会定期合并、超量淘汰），漏记则永远找不回来。
+        只有纯问候（「在吗」「晚安」）或用户整轮都在问你问题时，才输出 []。
+        发现记错或过时的信息，用 update / delete 修正，不要重复创建。
     """.trimIndent()
+
+    /**
+     * 收尾提醒，拼在**整个请求的最末尾**（对话历史之后）。
+     *
+     * [instructions] 在首条 system 消息里，离生成点隔着几十条历史，模型写到末尾时
+     * 注意力已经散了。这里用一句话把要求顶回视野内。
+     */
+    fun reminder(): String =
+        "（提醒：回复正文写完后务必附加 ```$FENCE_LANG 块；" +
+            "用户提到了任何具体的人/事/物/时间/感受，就至少记 1 条 SHORT_TERM。）"
 
     /**
      * 从模型原始回复中剥离记忆协议块，返回干净的可见回复与解析出的操作列表。
@@ -122,7 +150,8 @@ object MemoryOpsProtocol {
 
         val ops = parseOpsLenient(rawReply.substring(bodyStart, closeIdx))
         Log.i(TAG, "Parsed memory-ops block: ${ops.size} op(s)")
-        return ParseResult(visible, ops)
+        // 原文照搬（含围栏）：下一轮把它贴回历史，模型才有自己写过的正例可循
+        return ParseResult(visible, ops, rawReply.substring(open.range.first, blockEnd))
     }
 
     /**

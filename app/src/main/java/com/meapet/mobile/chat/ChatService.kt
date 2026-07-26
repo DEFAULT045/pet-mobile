@@ -65,8 +65,8 @@ class ChatService(
                 )
                 conversationManager.addMessage(userMessage)
 
-                // 2) 获取记忆上下文
-                val contextMemory = memoryManager?.buildContext(content) ?: ""
+                // 2) 获取记忆上下文（拆成稳定段与每轮都变的尾部段，见 MemoryContext）
+                val memoryContext = memoryManager?.buildContext(content)
 
                 // 3) 获取设置
                 val systemPrompt = settingsManager.getSystemPrompt()
@@ -74,11 +74,21 @@ class ChatService(
                 val temperature = settingsManager.getTemperature()
                 val maxTokens = settingsManager.getMaxTokens()
 
-                // 4) 构建 API 请求
+                // 4) 构建 API 请求。时间与记忆回忆一起压在历史之后：都是每轮都变的内容，
+                //    放前面会让排在其后的协议说明与全部历史都无法命中服务端 prefix cache
+                val tailContext = listOfNotNull(
+                    TimeContext.describe(),
+                    memoryContext?.tail?.takeIf { it.isNotBlank() }
+                ).joinToString("\n\n")
+
                 val apiMessages = conversationManager.buildApiMessages(
                     systemPrompt = systemPrompt,
-                    contextMemory = contextMemory,
-                    maxMessages = config.maxHistoryMessages
+                    stableContext = memoryContext?.stable ?: "",
+                    tailContext = tailContext,
+                    maxMessages = config.maxHistoryMessages,
+                    // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该出现协议块
+                    memoryOpsEchoTurns =
+                        if (memoryContext?.stable.isNullOrBlank()) 0 else config.memoryOpsEchoTurns
                 )
 
                 val jsonMessages = apiMessages.map { msg ->
@@ -93,7 +103,11 @@ class ChatService(
                     stream = false
                 )
 
-                Log.d(TAG, "Sending request to $model (${apiMessages.size} messages)")
+                Log.d(
+                    TAG,
+                    "Sending request to $model (${apiMessages.size} messages, " +
+                        "${apiMessages.sumOf { it.content.length }} chars)"
+                )
 
                 // 5) 发送请求
                 val responseJson = clientProvider().chatCompletion(requestBody)
@@ -108,10 +122,13 @@ class ChatService(
                     )
                 }
                 // 6b) 剥离模型附在回复末尾的记忆协议块（对用户不可见，见 MemoryOpsProtocol）
-                val (visibleReply, memoryOps) = MemoryOpsProtocol.extract(assistantContent)
+                val parsed = MemoryOpsProtocol.extract(assistantContent)
+                val memoryOps = parsed.ops
                 val assistantMessage = ChatMessage(
                     role = ChatRole.assistant,
-                    content = visibleReply
+                    content = parsed.visibleReply,
+                    // 块留在消息上（不展示），下一轮贴回历史当格式范例，见 ConversationManager
+                    memoryOpsBlock = parsed.rawBlock
                 )
                 conversationManager.addMessage(assistantMessage)
 
@@ -129,7 +146,7 @@ class ChatService(
                     }
                 }
 
-                Log.d(TAG, "Response received (${visibleReply.length} chars)")
+                Log.d(TAG, "Response received (${parsed.visibleReply.length} chars)")
                 Result.success(userMessage to assistantMessage)
 
             } catch (e: CancellationException) {

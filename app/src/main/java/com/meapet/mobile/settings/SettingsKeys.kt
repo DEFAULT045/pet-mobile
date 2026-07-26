@@ -14,6 +14,14 @@ object SettingsKeys {
     const val ENABLE_MEMORY = "enable_memory"
     const val ENABLE_AUTO_SUMMARY = "enable_auto_summary"
     const val SUMMARY_INTERVAL = "summary_interval"
+
+    /**
+     * 距上次摘要已进行的对话轮数。
+     *
+     * 不是用户设置，只是借 DataStore 存一个跨进程存活的计数器——放内存里的话
+     * 每次冷启动归零，默认 10 轮的间隔实际上永远走不满（见 MemoryManager）。
+     */
+    const val EXCHANGE_COUNT = "exchange_count"
     const val SYSTEM_PROMPT = "system_prompt"
     const val THEME_MODE = "theme_mode"  // "system" | "light" | "dark"
     const val ENABLE_DYNAMIC_COLOR = "enable_dynamic_color"

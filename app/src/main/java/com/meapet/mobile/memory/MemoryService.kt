@@ -119,14 +119,18 @@ class MemoryService(
      * 成功后删除参与本次摘要的短期条目（只删调用开始时取到的快照，
      * 不影响调用期间新产生的短期记忆）；失败时短期记忆原样保留，下次触发再试。
      *
-     * @return 生成的长期记忆条目；无短期记忆可摘要或调用失败均返回 null
+     * @return 生成的长期记忆条目；短期记忆不足 [AppConfig.minSummaryItems] 条或调用失败均返回 null
      */
     suspend fun summarizeShortTermMemories(): MemoryItem? {
         if (!settingsManager.isMemoryEnabled()) return null
         if (!settingsManager.isAutoSummaryEnabled()) return null
 
         val pending = repository.getByType(MemoryType.SHORT_TERM)
-        if (pending.isEmpty()) return null
+        // 攒够几条再合并：只有一两条时"摘要"等于原样搬运，白花一次请求
+        if (pending.size < config.minSummaryItems) {
+            Log.d(TAG, "Summary skipped: only ${pending.size} short-term memories (need ${config.minSummaryItems})")
+            return null
+        }
 
         val client = summarizationClient() ?: return null
 
@@ -162,15 +166,23 @@ class MemoryService(
                 val result = parseSummaryResult(raw) ?: return@withContext null
                 if (result.content.isBlank()) return@withContext null
 
+                // keywords 为空的长期记忆永远匹配不上（MemoryRepository.getRelevant 直接跳过），
+                // 落库就等于删掉 N 条短期记忆换来一条检索不到的死记录——宁可放弃本次摘要
+                val keywords = result.keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(8)
+                if (keywords.isEmpty()) {
+                    Log.w(TAG, "Summary discarded: model returned no keywords, short-term memories kept")
+                    return@withContext null
+                }
+
                 val item = MemoryItem(
                     id = MemoryItem.newId(),
                     content = result.content,
                     type = MemoryType.LONG_TERM,
                     importance = result.importance.coerceIn(0f, 1f),
-                    keywords = result.keywords.take(8)
+                    keywords = keywords
                 )
                 repository.save(item)
-                pending.forEach { repository.delete(it.id) }
+                repository.deleteAll(pending.map { it.id })
                 Log.i(TAG, "Summarized ${pending.size} short-term memories into one long-term memory")
                 item
             } catch (e: CancellationException) {
