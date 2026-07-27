@@ -120,6 +120,36 @@ object MemoryOpsProtocol {
             "用户提到了任何具体的人/事/物/时间/感受，就至少记 1 条 SHORT_TERM。）"
 
     /**
+     * 冷启动 / 历史里还没有任何协议块正例时，塞进请求的格式示范。
+     *
+     * 回贴真实块（[ChatMessage.memoryOpsBlock]）是最强的模仿源，但只在模型**曾经**
+     * 产出过块时才有东西可贴。冷启动、或前几轮全漏掉时，历史里全是「没有块的助手
+     * 回复」——这比 system 里的文字说明更有说服力，会把漏输出自我强化下去。
+     * 这时用一对合成对话补一个正例，打断负反馈环。
+     *
+     * 内容与 [instructions] 里的 JSON 示例保持一致，避免两处说法打架。
+     */
+    data class FormatSeed(
+        /** 合成 user 轮的正文 */
+        val user: String,
+        /** 合成 assistant 轮的可见正文（不含协议块） */
+        val assistant: String,
+        /** 协议块原文（含围栏），贴到 assistant 末尾 */
+        val block: String
+    ) {
+        /** 发给模型时 assistant 消息的完整 content。 */
+        val assistantWithBlock: String get() = "$assistant\n\n$block"
+    }
+
+    fun formatSeed(): FormatSeed = FormatSeed(
+        user = "这周论文好赶啊，压力好大",
+        assistant = "那要好好休息喵~",
+        block = """```$FENCE_LANG
+[{"op":"create","type":"SHORT_TERM","content":"用户这周在赶毕业论文，压力很大","importance":0.5,"keywords":["毕业论文","赶论文","压力"]}]
+```"""
+    )
+
+    /**
      * 从模型原始回复中剥离记忆协议块，返回干净的可见回复与解析出的操作列表。
      */
     fun extract(rawReply: String): ParseResult {

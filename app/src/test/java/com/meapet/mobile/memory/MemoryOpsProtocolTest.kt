@@ -229,4 +229,19 @@ class MemoryOpsProtocolTest {
             "未闭合的块不该被当范例贴回去"
         )
     }
+
+    // ── formatSeed（冷启动 / 无正例时的合成 few-shot）────
+
+    @Test
+    fun formatSeedBlockIsParseableAndMatchesInstructionsExample() {
+        val seed = MemoryOpsProtocol.formatSeed()
+        // 合成块必须能被 extract 原样吃下，否则贴回去也是白贴
+        val parsed = MemoryOpsProtocol.extract("${seed.assistant}\n\n${seed.block}")
+        assertEquals(seed.assistant, parsed.visibleReply)
+        assertEquals(seed.block, parsed.rawBlock)
+        val op = parsed.ops.single() as MemoryOpsProtocol.MemoryOp.Create
+        assertEquals(MemoryType.SHORT_TERM, op.type)
+        assertTrue(op.content.contains("毕业论文"), "与 instructions() 示例一致，避免两处说法打架")
+        assertTrue(seed.assistantWithBlock.endsWith(seed.block))
+    }
 }
