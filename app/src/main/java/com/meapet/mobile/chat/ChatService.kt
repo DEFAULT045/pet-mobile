@@ -81,18 +81,14 @@ class ChatService(
                     memoryContext?.tail?.takeIf { it.isNotBlank() }
                 ).joinToString("\n\n")
 
-                // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该出现协议块 / 合成正例
+                // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该回贴协议块
                 val memoryOn = !memoryContext?.stable.isNullOrBlank()
-                val formatSeed = if (memoryOn) MemoryOpsProtocol.formatSeed() else null
                 val apiMessages = conversationManager.buildApiMessages(
                     systemPrompt = systemPrompt,
                     stableContext = memoryContext?.stable ?: "",
                     tailContext = tailContext,
                     maxMessages = config.maxHistoryMessages,
-                    memoryOpsEchoTurns = if (memoryOn) config.memoryOpsEchoTurns else 0,
-                    // 历史里还没有真实协议块可回贴时，用这对合成对话补一个格式正例，
-                    // 打断「漏一次 → 后面全漏」的负反馈环（见 ConversationManager.echoOrSeedMemoryOps）
-                    memoryOpsSeed = formatSeed?.let { Triple(it.user, it.assistant, it.block) }
+                    memoryOpsEchoTurns = if (memoryOn) config.memoryOpsEchoTurns else 0
                 )
 
                 val jsonMessages = apiMessages.map { msg ->

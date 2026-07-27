@@ -95,17 +95,13 @@ class ConversationManager(
      * @param maxMessages 最大消息数（滑动窗口，从末尾取）
      * @param memoryOpsEchoTurns 最近多少条助手消息要把 [ChatMessage.memoryOpsBlock] 贴回正文
      *   （0 = 不贴）。仅影响发给模型的副本，不改动会话历史本身
-     * @param memoryOpsSeed 历史里还没有任何可回贴的协议块时，用来补一个格式正例。
-     *   `first` = 合成 user 正文，`second` = 合成 assistant 可见正文，`third` = 协议块原文。
-     *   传 null 或 [memoryOpsEchoTurns] = 0 时不注入。本类不依赖记忆模块，由调用方构造
      */
     fun buildApiMessages(
         systemPrompt: String,
         stableContext: String = "",
         tailContext: String = "",
         maxMessages: Int = 30,
-        memoryOpsEchoTurns: Int = 0,
-        memoryOpsSeed: Triple<String, String, String>? = null
+        memoryOpsEchoTurns: Int = 0
     ): List<ChatMessage> {
         val systemContent = buildString {
             append(systemPrompt)
@@ -114,20 +110,13 @@ class ConversationManager(
             }
         }
 
-        // 冷启动要前置 2 条合成消息时，给它们留名额，避免总条数悄悄超窗
-        val willNeedSeedSlot = memoryOpsEchoTurns > 0 && memoryOpsSeed != null
         val recentMessages = synchronized(lock) {
-            val nonSystem = messages.filter { it.role != ChatRole.system }
-            val hasRealBlock = nonSystem.any {
-                it.role == ChatRole.assistant && !it.memoryOpsBlock.isNullOrBlank()
-            }
-            val reserve = if (willNeedSeedSlot && !hasRealBlock && nonSystem.none { it.role == ChatRole.assistant }) 2 else 0
-            nonSystem.takeLast((maxMessages - reserve).coerceAtLeast(1))
+            messages.filter { it.role != ChatRole.system }.takeLast(maxMessages)
         }
 
         return buildList {
             add(ChatMessage(role = ChatRole.system, content = systemContent))
-            addAll(echoOrSeedMemoryOps(recentMessages, memoryOpsEchoTurns, memoryOpsSeed))
+            addAll(echoMemoryOps(recentMessages, memoryOpsEchoTurns))
             if (tailContext.isNotBlank()) {
                 add(ChatMessage(role = ChatRole.system, content = tailContext))
             }
@@ -163,23 +152,13 @@ class ConversationManager(
     // ── 内部 ──────────────────────────────────────────
 
     /**
-     * 给模型准备「自己写过协议块」的正例。
+     * 把最近 [turns] 条助手消息的 [ChatMessage.memoryOpsBlock] 贴回正文，
+     * 让模型在历史里能看到自己写过的协议块正例。
      *
-     * 1. **有真实块** → 把最近 [turns] 条助手消息的 [ChatMessage.memoryOpsBlock] 贴回正文。
-     *    这是最强的模仿源：模型看到的是自己过去真的写过的东西。
-     * 2. **一条真实块都没有**（冷启动，或前几轮全漏了）→ 用 [seed] 补一个格式正例，
-     *    否则历史里全是「没有块的助手回复」，漏输出会自我强化，越往后越不产出。
-     *    - 已有助手消息：只在**最近一条**助手回复末尾贴 seed 块（模仿最强位置，
-     *      且不把同一条假记忆盖到多轮上）；
-     *    - 还没有任何助手消息：在历史最前插入一对合成 user/assistant。
-     *
+     * 只回贴**真实**存过的块；没有块的轮次保持原样，不注入合成 few-shot。
      * 只影响发给模型的副本，不改动会话历史本身。
      */
-    private fun echoOrSeedMemoryOps(
-        msgs: List<ChatMessage>,
-        turns: Int,
-        seed: Triple<String, String, String>?
-    ): List<ChatMessage> {
+    private fun echoMemoryOps(msgs: List<ChatMessage>, turns: Int): List<ChatMessage> {
         if (turns <= 0) return msgs
 
         val echoIds = msgs.asReversed()
@@ -187,28 +166,11 @@ class ConversationManager(
             .take(turns)
             .mapTo(mutableSetOf()) { it.id }
 
-        if (echoIds.isNotEmpty()) {
-            return msgs.map { msg ->
-                if (msg.id in echoIds) msg.copy(content = "${msg.content}\n\n${msg.memoryOpsBlock}") else msg
-            }
+        if (echoIds.isEmpty()) return msgs
+
+        return msgs.map { msg ->
+            if (msg.id in echoIds) msg.copy(content = "${msg.content}\n\n${msg.memoryOpsBlock}") else msg
         }
-
-        if (seed == null) return msgs
-        val (seedUser, seedAssistant, seedBlock) = seed
-
-        val lastAssistantIdx = msgs.indexOfLast { it.role == ChatRole.assistant }
-        if (lastAssistantIdx >= 0) {
-            // 邻近轮次的模仿最强：只给最近一条助手回复贴上格式正例
-            return msgs.mapIndexed { i, msg ->
-                if (i == lastAssistantIdx) msg.copy(content = "${msg.content}\n\n$seedBlock") else msg
-            }
-        }
-
-        // 冷启动：前置一对合成对话当 few-shot
-        return listOf(
-            ChatMessage(role = ChatRole.user, content = seedUser),
-            ChatMessage(role = ChatRole.assistant, content = "$seedAssistant\n\n$seedBlock")
-        ) + msgs
     }
 
     /** 必须在持有 [lock] 时调用。 */

@@ -32,7 +32,8 @@ enum class MemoryType {
  * @property lastAccessedAt 最后访问时间戳（用于 LRU 淘汰）
  * @property accessCount 访问次数
  * @property sourceMessageId 来源消息 ID（关联回对话）
- * @property keywords 检索关键词（模型创建时给出，3~8 个），[MemoryRepository.getRelevant] 仅匹配这份关键词
+ * @property keywords 查找词（模型创建时给出，3~8 个：用户以后聊相关话题时会说出口的词，
+     *   覆盖实体与类别，而非从 content 机械摘词）；[MemoryRepository.getRelevant] 仅匹配这份列表
  */
 @Serializable
 data class MemoryItem(

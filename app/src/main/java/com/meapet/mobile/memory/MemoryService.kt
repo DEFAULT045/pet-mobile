@@ -140,7 +140,9 @@ class MemoryService(
                 val prompt = buildString {
                     appendLine("以下是若干条短期记忆，请提炼合并为一条长期记忆。")
                     appendLine("要求：content 用一句话概括、去除重复信息；importance 给 0~1 的重要性评分；")
-                    appendLine("keywords 给 3~8 个以后能检索到这条记忆的关键词。")
+                    appendLine("keywords 给 3~8 个**查找词**：用户以后聊到相关话题时会说出口、用来捞回这条记忆的词。")
+                    appendLine("要覆盖具体事物 + 相关话题/类别（如「用户喜欢炸鸡」→ 炸鸡、喜欢、喜好、食物），")
+                    appendLine("别只从 content 机械摘词，也别塞「用户」「记忆」「对话」这类空词。")
                     appendLine("只输出一个 JSON 对象，不要输出任何其他文字，格式：")
                     appendLine("""{"content":"...","importance":0.x,"keywords":["...","..."]}""")
                     appendLine()

@@ -230,18 +230,49 @@ class MemoryOpsProtocolTest {
         )
     }
 
-    // ── formatSeed（冷启动 / 无正例时的合成 few-shot）────
+    @Test
+    fun instructionsAndReminderAskForLookupKeywordsNotContentSnippets() {
+        val instructions = MemoryOpsProtocol.instructions()
+        val reminder = MemoryOpsProtocol.reminder()
+        assertTrue(instructions.contains("查找词"), "应明确 keywords 是查找词")
+        assertTrue(
+            instructions.contains("炸鸡") && instructions.contains("喜好") && instructions.contains("食物"),
+            "应给出「实体 + 话题/类别」的正例，而不是只摘 content"
+        )
+        assertFalse(
+            instructions.contains("多记无负担"),
+            "不应再鼓励见字就记"
+        )
+        assertFalse(
+            instructions.contains("就至少记 1 条 SHORT_TERM"),
+            "不应再写硬性至少记一条"
+        )
+        assertTrue(
+            instructions.contains("通常不必记") || instructions.contains("纯寒暄"),
+            "应软过滤闲聊废话"
+        )
+        assertTrue(reminder.contains("查找词"), "收尾提醒也应点明查找词")
+        assertTrue(reminder.contains("纯寒暄可 []"), "收尾提醒应允许纯寒暄空数组")
+    }
 
     @Test
-    fun formatSeedBlockIsParseableAndMatchesInstructionsExample() {
-        val seed = MemoryOpsProtocol.formatSeed()
-        // 合成块必须能被 extract 原样吃下，否则贴回去也是白贴
-        val parsed = MemoryOpsProtocol.extract("${seed.assistant}\n\n${seed.block}")
-        assertEquals(seed.assistant, parsed.visibleReply)
-        assertEquals(seed.block, parsed.rawBlock)
-        val op = parsed.ops.single() as MemoryOpsProtocol.MemoryOp.Create
-        assertEquals(MemoryType.SHORT_TERM, op.type)
-        assertTrue(op.content.contains("毕业论文"), "与 instructions() 示例一致，避免两处说法打架")
-        assertTrue(seed.assistantWithBlock.endsWith(seed.block))
+    fun instructionsForbidTreatingAssistantLinesAsUserFacts() {
+        val instructions = MemoryOpsProtocol.instructions()
+        val reminder = MemoryOpsProtocol.reminder()
+        assertTrue(
+            instructions.contains("只能记用户侧") || instructions.contains("只记用户"),
+            "应强调只记用户侧"
+        )
+        assertTrue(
+            instructions.contains("一起去食堂") ||
+                instructions.contains("邀请") ||
+                instructions.contains("提议") ||
+                instructions.contains("禁止记你自己的回答"),
+            "应给出「助手提议 ≠ 用户事实」的警示"
+        )
+        assertTrue(
+            reminder.contains("勿把你的提议当事实") || reminder.contains("提议当事实"),
+            "收尾提醒应禁止把助手提议当事实"
+        )
     }
 }

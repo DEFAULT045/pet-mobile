@@ -148,93 +148,19 @@ class ConversationManagerTest {
         assertTrue(assistants[2].content.endsWith(block("[2]")))
     }
 
-    // ── 无正例时注入合成 few-shot ────────────────────────
-
-    private val seed = Triple(
-        "这周论文好赶啊，压力好大",
-        "那要好好休息喵~",
-        block("""[{"op":"create","type":"SHORT_TERM"}]""")
-    )
-
     @Test
-    fun seedPrependedWhenColdStartHasNoAssistantTurns() {
-        val mgr = ConversationManager()
-        mgr.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
+    fun noSyntheticSeedWhenHistoryHasNoRealBlocks() {
+        // 冷启动 / 前几轮全漏：不再注入合成 few-shot，只回贴真实块
+        val cold = ConversationManager()
+        cold.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
+        val coldSent = cold.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 3)
+        assertEquals(2, coldSent.size)
+        assertEquals("你好", coldSent[1].content)
+        assertFalse(coldSent.any { it.content.contains("```") })
 
-        val sent = mgr.buildApiMessages(
-            systemPrompt = "p",
-            memoryOpsEchoTurns = 3,
-            memoryOpsSeed = seed
-        )
-        // system + seed(user,assistant) + 真实 user
-        assertEquals(4, sent.size)
-        assertEquals(ChatRole.user, sent[1].role)
-        assertEquals(seed.first, sent[1].content)
-        assertEquals(ChatRole.assistant, sent[2].role)
-        assertTrue(sent[2].content.endsWith(seed.third), "冷启动应前置带协议块的合成 assistant")
-        assertEquals("你好", sent[3].content)
-    }
-
-    @Test
-    fun seedStampsOnlyLastAssistantWhenAllRealBlocksMissing() {
-        // 前几轮全漏了：历史里没有 memoryOpsBlock，但已有助手回复
-        val mgr = managerWith("漏了1" to null, "漏了2" to null)
-
-        val sent = mgr.buildApiMessages(
-            systemPrompt = "p",
-            memoryOpsEchoTurns = 3,
-            memoryOpsSeed = seed
-        )
-        val assistants = sent.filter { it.role == ChatRole.assistant }
-
-        assertEquals(2, assistants.size, "已有历史时不应再前置合成对话")
-        assertEquals("漏了1", assistants[0].content, "旧的漏掉轮次不要凭空盖上假块")
-        assertTrue(
-            assistants[1].content.endsWith(seed.third),
-            "只在最近一条助手回复贴格式正例（邻近轮次模仿最强）"
-        )
-        assertTrue(assistants[1].content.startsWith("漏了2"))
-    }
-
-    @Test
-    fun realBlocksPreferRealEchoOverSeed() {
-        val mgr = managerWith("有块" to block("[real]"), "漏了" to null)
-
-        val sent = mgr.buildApiMessages(
-            systemPrompt = "p",
-            memoryOpsEchoTurns = 3,
-            memoryOpsSeed = seed
-        )
-        val assistants = sent.filter { it.role == ChatRole.assistant }
-
-        assertTrue(assistants[0].content.endsWith(block("[real]")), "有真实块时优先回贴真实的")
-        assertEquals("漏了", assistants[1].content, "有真实块时不应再贴 seed")
-        assertFalse(sent.any { it.content == seed.first }, "不应插入合成 user")
-    }
-
-    @Test
-    fun seedDoesNotMutateStoredHistory() {
-        val mgr = managerWith("漏了" to null)
-
-        mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 3, memoryOpsSeed = seed)
-
-        val stored = mgr.getMessages().first { it.role == ChatRole.assistant }
-        assertEquals("漏了", stored.content)
-        assertFalse(mgr.getMessages().any { it.content.contains("```") })
-    }
-
-    @Test
-    fun seedDisabledWhenEchoTurnsZero() {
-        val mgr = ConversationManager()
-        mgr.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
-
-        val sent = mgr.buildApiMessages(
-            systemPrompt = "p",
-            memoryOpsEchoTurns = 0,
-            memoryOpsSeed = seed
-        )
-
-        assertEquals(2, sent.size)
-        assertEquals("你好", sent[1].content)
+        val leaked = managerWith("漏了1" to null, "漏了2" to null)
+        val assistants = leaked.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 3)
+            .filter { it.role == ChatRole.assistant }
+        assertEquals(listOf("漏了1", "漏了2"), assistants.map { it.content })
     }
 }
