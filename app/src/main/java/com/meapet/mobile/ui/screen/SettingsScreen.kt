@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -92,6 +93,7 @@ import com.meapet.mobile.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenPrivacyPolicy: () -> Unit = {},
     settingsViewModel: SettingsViewModel = viewModel()
 ) {
     val state by settingsViewModel.state.collectAsState()
@@ -458,6 +460,121 @@ fun SettingsScreen(
                 ColorPresetSelector(
                     currentPreset = state.colorPreset,
                     onSelect = { settingsViewModel.updateColorPreset(it) }
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ══════════════════════════════════════════
+            //  隐私与数据
+            // ══════════════════════════════════════════
+            SectionTitle("隐私与数据")
+
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var umengAgreed by remember { mutableStateOf(
+                com.meapet.mobile.framework.PrivacyConsentManager.isAgreed(context)
+            ) }
+            var showRevokeDialog by remember { mutableStateOf(false) }
+
+            // 查看隐私协议
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenPrivacyPolicy() },
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "查看隐私政策",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer { rotationZ = 180f }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // 友盟统计数据采集授权状态
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "统计数据采集",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (umengAgreed)
+                            "已授权：友盟统计 SDK 正在采集匿名使用数据"
+                        else
+                            "未授权：不会采集任何统计数据，App 正常使用",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (umengAgreed)
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                    if (umengAgreed) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { showRevokeDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("取消数据采集授权")
+                        }
+                    }
+                }
+            }
+
+            if (showRevokeDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRevokeDialog = false },
+                    title = { Text("取消数据采集授权") },
+                    text = {
+                        Text(
+                            "取消后友盟统计 SDK 将停止采集数据。需要重启 App 才能完全生效。App 其余功能不受影响。"
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            com.meapet.mobile.framework.PrivacyConsentManager
+                                .setAgreed(context, false)
+                            umengAgreed = false
+                            showRevokeDialog = false
+                        }) {
+                            Text("确认取消")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRevokeDialog = false }) {
+                            Text("保留授权")
+                        }
+                    }
                 )
             }
 

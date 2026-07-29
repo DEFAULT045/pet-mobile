@@ -1,8 +1,19 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// 从 local.properties 读取友盟 AppKey，与代码隔离
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+val umengAppKey: String = localProperties.getProperty("umeng.appKey", "") ?: ""
 
 android {
     namespace = "com.meapet.mobile"
@@ -16,14 +27,17 @@ android {
         applicationId = "com.meapet.mobile"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.2.1"
+        versionCode = 7
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         }
+
+        // 友盟 AppKey 通过 BuildConfig 注入，源码中不硬编码
+        buildConfigField("String", "UMENG_APP_KEY", "\"$umengAppKey\"")
     }
 
     buildTypes {
@@ -39,6 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     testOptions {
         unitTests {
@@ -74,6 +89,10 @@ dependencies {
     // Kotlinx Serialization (for OpenAI client)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
+
+    // 友盟+ 统计 SDK (U-APP)
+    implementation(libs.umeng.umsdk.common)  // 必选：统计核心
+    implementation(libs.umeng.umsdk.asms)    // 必选：重要组件
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

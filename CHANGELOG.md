@@ -12,6 +12,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+---
+
+## [1.3.0] - 2026-07-29
+
+### Added
+
+- **友盟+ 统计 SDK 集成** — 接入友盟 U-APP 统计 SDK（common 9.9.2 + asms 1.8.7.2），采集匿名使用数据（启动次数、使用时长等）。AppKey 通过 `local.properties` 配置，与代码隔离。
+- **隐私协议弹窗** — 首次启动展示隐私授权弹窗，用户可选择同意或不同意。不同意时 App 所有功能正常使用，仅不初始化统计 SDK。弹窗内可查看完整隐私政策。弹窗使用 `Dialog + Card` 风格，与关于弹窗统一。
+- **设置页隐私入口** — 设置页底部新增「隐私与数据」分区，可跳转查看完整隐私政策，并支持取消数据采集授权。
+- **隐私政策内容统一** — 抽取 `PrivacyPolicyContent` 共享组件，弹窗全文和设置页共用同一份文本，修改一处即可同步。
+- **语音分区子目录管理** — `assets/voice/` 下新增 `upper/`、`lower_left/`、`lower_right/` 三个子目录，按触摸分区存放语音。`VoicePlayer` 新增 `listVoices()` 自动扫描目录内 `.wav` 文件。新增语音只需丢进文件夹即生效，无需改代码。
+
+### Changed
+
+- `build.gradle.kts` 开启 `buildConfig = true`，通过 `BuildConfig.UMENG_APP_KEY` 注入 AppKey。
+- `AndroidManifest.xml` 新增 `ACCESS_WIFI_STATE` 权限与友盟集成测试 intent-filter。
+- 新增 `PrivacyConsentManager` 管理用户授权状态的持久化。
+- 语音随机选择从 `java.util.Random` 改为 `SecureRandom`，降低连续点击重复感。
+- 语音播放改为互斥模式：新触摸触发时先停止所有在播语音再播放。
+
+### Fixed
+
+- **触摸气泡生命周期** — 每条气泡独立 7 秒倒计时。新气泡触发后按位置自动扣减旧气泡剩余寿命：position 4-5 扣 2 秒，position 6+ 共扣 4 秒，实现旧气泡加速消失。
+- **VoicePlayer 资源释放** — `MediaPlayer` 回调完成后正确 `release()`。
+
+### Notes
+
+- 本版本含友盟 SDK 接入（功能增量）、隐私 UI 重构与语音系统改进，按语义化版本升 **MINOR**。
+- 旧版本升级到 1.3.0 无破坏性变更，applicationId 不变，可覆盖安装。
+
+---
+
 ## [1.2.1] - 2026-07-27
 
 ### Added

@@ -71,12 +71,12 @@ import com.meapet.mobile.ui.component.OverlayMenu
 import com.meapet.mobile.viewmodel.ChatViewModel
 
 /** 内部页面导航。 */
-private enum class Page { CHAT, SETTINGS }
+private enum class Page { CHAT, SETTINGS, PRIVACY }
 
 /**
  * 聊天界面入口。
  *
- * 内部管理 CHAT / SETTINGS 页面切换，带滑动过渡动画。
+ * 内部管理 CHAT / SETTINGS / PRIVACY 页面切换，带滑动过渡动画。
  */
 @Composable
 fun ChatScreenContent(
@@ -85,12 +85,15 @@ fun ChatScreenContent(
 ) {
     var currentPage by remember { mutableStateOf(Page.CHAT) }
 
-    // 在设置页时拦截系统返回键 → 回到聊天页
+    // 在设置页/隐私页时拦截系统返回键 → 回到上一级
     BackHandler(enabled = currentPage == Page.SETTINGS) {
         currentPage = Page.CHAT
     }
+    BackHandler(enabled = currentPage == Page.PRIVACY) {
+        currentPage = Page.SETTINGS
+    }
 
-    // 切换页面时同步触摸分区开关（设置页内禁止穿透）
+    // 切换页面时同步触摸分区开关（设置页/隐私页内禁止穿透）
     LaunchedEffect(currentPage) {
         Live2dDelegate.getInstance().zoneTouchEnabled = currentPage == Page.CHAT
     }
@@ -98,12 +101,13 @@ fun ChatScreenContent(
     AnimatedContent(
         targetState = currentPage,
         transitionSpec = {
-            if (targetState == Page.SETTINGS) {
-                // 进入设置页：新页从右滑入，当前页向左滑出
+            val forward = targetState.ordinal > initialState.ordinal
+            if (forward) {
+                // 进入深层页面：新页从右滑入，当前页向左滑出
                 (slideInHorizontally { width -> width } + fadeIn())
                     .togetherWith(slideOutHorizontally { width -> -width / 3 } + fadeOut())
             } else {
-                // 返回聊天页：新页从左侧滑入，当前页向右滑出
+                // 返回浅层页面：新页从左滑入，当前页向右滑出
                 (slideInHorizontally { width -> -width } + fadeIn())
                     .togetherWith(slideOutHorizontally { width -> width / 3 } + fadeOut())
             }
@@ -112,7 +116,12 @@ fun ChatScreenContent(
     ) { page ->
         when (page) {
             Page.SETTINGS -> SettingsScreen(
-                onBack = { currentPage = Page.CHAT }
+                onBack = { currentPage = Page.CHAT },
+                onOpenPrivacyPolicy = { currentPage = Page.PRIVACY }
+            )
+
+            Page.PRIVACY -> PrivacyPolicyScreen(
+                onBack = { currentPage = Page.SETTINGS }
             )
 
             Page.CHAT -> ChatPage(

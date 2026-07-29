@@ -19,7 +19,9 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -125,7 +127,26 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // ── 隐私协议弹窗（首次启动且未做过选择时显示） ──
+                val context = androidx.compose.ui.platform.LocalContext.current
+                var showPrivacyDialog by remember {
+                    mutableStateOf(!PrivacyConsentManager.hasUserChosen(context))
+                }
+
                 MeaPetTheme(themeMode = themeMode, dynamicColor = enableDynamicColor, colorPreset = colorPreset) {
+                    if (showPrivacyDialog) {
+                        com.meapet.mobile.ui.component.PrivacyDialog(
+                            onAgree = {
+                                PrivacyConsentManager.setAgreed(context, true)
+                                (applicationContext as? MeaPetApplication)?.initUmengSdk()
+                                showPrivacyDialog = false
+                            },
+                            onDisagree = {
+                                PrivacyConsentManager.setAgreed(context, false)
+                                showPrivacyDialog = false
+                            }
+                        )
+                    }
                     ChatScreenContent(onToggleOverlay = { toggleOverlay() })
                 }
             }

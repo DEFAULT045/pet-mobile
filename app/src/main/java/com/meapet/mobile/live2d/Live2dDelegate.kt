@@ -6,6 +6,7 @@ import android.opengl.GLES20
 import android.util.Log
 import com.live2d.sdk.cubism.framework.CubismFramework
 import com.live2d.sdk.cubism.framework.rendering.android.CubismShaderAndroid
+import java.security.SecureRandom
 
 /**
  * Singleton application delegate — manages Cubism SDK lifecycle,
@@ -15,6 +16,15 @@ class Live2dDelegate private constructor() {
 
     companion object {
         private const val TAG = "Live2dDelegate"
+
+        // ── 语音分区目录常量 ──
+        private const val VOICE_DIR_UPPER    = "voice/upper"
+        private const val VOICE_DIR_LOWER_L  = "voice/lower_left"
+        private const val VOICE_DIR_LOWER_R  = "voice/lower_right"
+
+        /** 从文件名提取显示文本："jp_哼。.wav" → "哼。" */
+        fun textFromFilename(name: String): String =
+            name.substringAfter("_").substringBeforeLast(".")
 
         @Volatile
         private var instance: Live2dDelegate? = null
@@ -194,24 +204,6 @@ class Live2dDelegate private constructor() {
         }
     }
 
-    fun onTouchEnd(x: Float, y: Float) {
-        mouseX = x; mouseY = y
-        isCaptured = false
-        Live2dManager.getInstance().onDrag(0.0f, 0.0f)
-
-        // 检测轻触 → 分区反馈（仅在聊天页启用，防止设置页穿透）
-        if (zoneTouchEnabled && isTap(x, y)) {
-            val zone = detectZone(x, y)
-            if (zone != null) {
-                val (text, file) = zone
-                // 播放语音
-                ensureVoicePlayer()?.play(file)
-                // 广播消息到 ChatViewModel
-                Live2dManager.emitTapMessage(text)
-            }
-        }
-    }
-
     fun onTouchMoved(x: Float, y: Float) {
         mouseX = x; mouseY = y
         if (isCaptured && windowWidth > 0 && windowHeight > 0) {
@@ -222,23 +214,29 @@ class Live2dDelegate private constructor() {
         }
     }
 
+    private val secureRandom = SecureRandom()
     private var mouseX = 0f
     private var mouseY = 0f
 
     // ── 触摸分区系统 ──
 
-    private var voicePlayer: VoicePlayer? = null
     private var touchDownX = 0f
     private var touchDownY = 0f
     private var touchDownTime = 0L
 
-    /** 懒初始化 VoicePlayer（需要 Context，在 onSurfaceCreated 后可用）。 */
-    private fun ensureVoicePlayer(): VoicePlayer? {
-        if (voicePlayer == null) {
-            val ctx = _appContext ?: _activity?.applicationContext ?: return null
-            voicePlayer = VoicePlayer(ctx)
-        }
-        return voicePlayer
+    /** 已创建的 VoicePlayer 缓存，按子目录 key 存储，复用同一个播放器。 */
+    private val voicePlayers = mutableMapOf<String, VoicePlayer>()
+
+    /** 获取或创建 VoicePlayer（需要 Context，在 onStart 后可用）。 */
+    private fun ensureVoicePlayer(dir: String): VoicePlayer? {
+        voicePlayers[dir]?.let { return it }
+        val ctx = _appContext ?: _activity?.applicationContext ?: return null
+        return VoicePlayer(ctx, dir).also { voicePlayers[dir] = it }
+    }
+
+    /** 停止当前所有正在播放的语音，确保新触发的语音立即生效。 */
+    private fun stopAllVoices() {
+        voicePlayers.values.forEach { it.stop() }
     }
 
     /** 判断是否为轻触（非拖动）。阈值：移动≤30px、时长≤400ms。 */
@@ -252,41 +250,53 @@ class Live2dDelegate private constructor() {
 
     // ── 触摸分区定义 ──
 
-    /** 各区域语音文件列表。文件名即文案来源（`jp_别摸了.wav` → 显示"别摸了"）。 */
-    private val files_upper    = listOf("jp_别摸了.wav", "jp_别摸我头发。.wav", "jp_有事吗？.wav", "jp_哼。.wav")
-    private val files_lowerL   = listOf("jp_变态。.wav", "jp_别摸了.wav", "jp_你想死一次吗？.wav", "jp_哼。.wav")
-    private val files_lowerR   = listOf(
-        "jp_变态。.wav", "jp_别摸了.wav", "jp_别摸我头发。.wav", "jp_哼。.wav",
-        "jp_你想死一次吗？.wav", "jp_尾巴不许碰喵！！.wav", "jp_尾巴是很敏感的不知道吗。.wav"
-    )
-
     /**
      * 检测触摸分区。
-     * @return (显示文本, 语音文件名)，不在模型区域内则 null
+     * @return (显示文本, 子目录名, 文件名)，不在模型区域内则 null
      */
-    private fun detectZone(x: Float, y: Float): Pair<String, String>? {
+    private fun detectZone(x: Float, y: Float): Triple<String, String, String>? {
         if (windowWidth <= 0 || windowHeight <= 0) return null
         val nx = (x / windowWidth) * 2f - 1f
         val ny = -((y / windowHeight) * 2f - 1f)
 
-        // 模型实际占屏区域（再上移 ~0.02，约 10px）
+        // 模型实际占屏区域
         if (nx < -0.45f || nx > 0.45f || ny < -0.44f || ny > 0.66f) return null
 
         // 从上往下 6/10 分割线
         val splitY = 0.00f
 
-        return if (ny > splitY) {
-            pickRandom(files_upper).let { textFromFilename(it) to it }
+        val dir = if (ny > splitY) {
+            VOICE_DIR_UPPER
         } else if (nx < 0f) {
-            pickRandom(files_lowerL).let { textFromFilename(it) to it }
+            VOICE_DIR_LOWER_L
         } else {
-            pickRandom(files_lowerR).let { textFromFilename(it) to it }
+            VOICE_DIR_LOWER_R
         }
+
+        val vp = ensureVoicePlayer(dir) ?: return null
+        val files = vp.listVoices()
+        if (files.isEmpty()) return null
+
+        val file = files[secureRandom.nextInt(files.size)]
+        return Triple(textFromFilename(file), dir, file)
     }
 
-    /** "jp_别摸了.wav" → "别摸了" */
-    private fun textFromFilename(name: String): String =
-        name.substringAfter("_").substringBeforeLast(".")
+    fun onTouchEnd(x: Float, y: Float) {
+        mouseX = x; mouseY = y
+        isCaptured = false
+        Live2dManager.getInstance().onDrag(0.0f, 0.0f)
 
-    private fun <T> pickRandom(list: List<T>): T = list[java.util.Random().nextInt(list.size)]
+        // 检测轻触 → 分区反馈（仅在聊天页启用，防止设置页穿透）
+        if (zoneTouchEnabled && isTap(x, y)) {
+            val zone = detectZone(x, y)
+            if (zone != null) {
+                val (text, dir, file) = zone
+                // 先停止所有正在播放的语音（包括其他分区的），再播放新语音
+                stopAllVoices()
+                ensureVoicePlayer(dir)?.play(file)
+                // 广播消息到 ChatViewModel
+                Live2dManager.emitTapMessage(text)
+            }
+        }
+    }
 }

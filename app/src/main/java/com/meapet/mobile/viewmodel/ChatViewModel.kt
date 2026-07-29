@@ -74,24 +74,48 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // 监听 Live2D 触摸分区事件→添加系统消息气泡，超时后自动移除
+        // 监听 Live2D 触摸分区事件→添加系统消息气泡
+        // 每条气泡独立生命周期，从产生开始倒计时 7 秒。
+        // 新消息到达时按位置自动扣除旧气泡的剩余寿命：
+        //   position 1-3（最新）→ 不扣
+        //   position 4-5          → 扣 2 秒
+        //   position 6+（最旧）→ 扣 4 秒（首次扣 2 秒 + 再次扣 2 秒）
         viewModelScope.launch {
+            // msgId → (剩余毫秒, 移除Job, 是否已扣过2秒)
+            val lifeMap = LinkedHashMap<String, Triple<Long, Job, Boolean>>()
+
             Live2dManager.tapMessageEvent.collect { text ->
                 val newMsg = ChatMessage(role = ChatRole.system, content = text)
                 _state.update { it.copy(messages = it.messages + newMsg) }
 
-                // 按"当前系统消息总数"决定此条消息的存活时长
-                val sysCount = _state.value.messages.count { it.role == ChatRole.system }
-                val timeout = when {
-                    sysCount > 5 -> 2000L
-                    sysCount > 3 -> 4000L
-                    else -> 7000L
-                }
-                // 延时后移除（新消息推旧→消失前一直可见，自然积累后加速淘汰）
-                launch {
-                    kotlinx.coroutines.delay(timeout)
-                    _state.update {
-                        it.copy(messages = it.messages.filterNot { m -> m.id == newMsg.id })
+                // 为本条启动独立倒计时，初始 7 秒
+                val job = scheduleRemove(lifeMap, newMsg.id, 7_000L)
+                lifeMap[newMsg.id] = Triple(7_000L, job, false)
+
+                // 重新排位：按 timestamp 降序（最新在前），重新分配剩余寿命
+                val sysIds = _state.value.messages
+                    .filter { it.role == ChatRole.system }
+                    .sortedByDescending { it.timestamp }
+                    .map { it.id }
+
+                sysIds.forEachIndexed { index, id ->
+                    val position = index + 1 // 1 = 最新
+                    val entry = lifeMap[id] ?: return@forEachIndexed
+                    val (currentLife, oldJob, alreadyReduced) = entry
+
+                    var newLife = currentLife
+                    if (position > 5 && alreadyReduced) {
+                        // 第 6+ 条且之前扣过 2 秒：再扣 2 秒
+                        newLife = (currentLife - 2_000L).coerceAtLeast(0)
+                    } else if (position > 3 && !alreadyReduced) {
+                        // 第 4-5 条：首次扣 2 秒
+                        newLife = (currentLife - 2_000L).coerceAtLeast(0)
+                    }
+
+                    if (newLife != currentLife) {
+                        oldJob.cancel()
+                        val newJob = scheduleRemove(lifeMap, id, newLife)
+                        lifeMap[id] = Triple(newLife, newJob, alreadyReduced || position > 3)
                     }
                 }
             }
@@ -303,6 +327,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun dismissAboutUpdateMessage() {
         _state.update { it.copy(aboutUpdateMessage = null, aboutReleaseUrl = null) }
+    }
+
+    /**
+     * 调度系统气泡的延时移除，返回对应的 Job。
+     * @param lifeMap 更新此 map 中的条目
+     * @param msgId 消息 ID
+     * @param delayMs 剩余毫秒数
+     */
+    private fun scheduleRemove(
+        lifeMap: MutableMap<String, Triple<Long, Job, Boolean>>,
+        msgId: String,
+        delayMs: Long
+    ): Job = viewModelScope.launch {
+        if (delayMs <= 0) {
+            removeBubble(msgId)
+            lifeMap.remove(msgId)
+            return@launch
+        }
+        kotlinx.coroutines.delay(delayMs)
+        removeBubble(msgId)
+        lifeMap.remove(msgId)
+    }
+
+    private fun removeBubble(msgId: String) {
+        _state.update {
+            it.copy(messages = it.messages.filterNot { m -> m.id == msgId })
+        }
     }
 
     /** 关于页手动检测：始终反馈结果（有更新 / 已是最新 / 失败）。 */

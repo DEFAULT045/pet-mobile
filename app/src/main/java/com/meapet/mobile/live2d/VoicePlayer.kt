@@ -1,6 +1,7 @@
 package com.meapet.mobile.live2d
 
 import android.content.Context
+import android.content.res.AssetFileDescriptor
 import android.media.MediaPlayer
 import android.util.Log
 
@@ -8,20 +9,34 @@ import android.util.Log
  * 语音播放器。
  * 从 assets/voice/ 加载并播放 .wav 文件。
  * 同步 prepare — 由 GL 线程调用，阻塞时间在可接受范围。
+ *
+ * @param voiceDir 语音子目录，如 "voice/upper"、"voice/lower_left"、"voice/lower_right"
  */
-class VoicePlayer(private val context: Context) {
-
+class VoicePlayer(
+    private val context: Context,
+    private val voiceDir: String
+) {
     private var player: MediaPlayer? = null
 
     companion object {
         private const val TAG = "VoicePlayer"
-        private const val VOICE_DIR = "voice"
+    }
+
+    /** 列出该子目录下所有 .wav 文件。 */
+    fun listVoices(): List<String> {
+        return try {
+            context.assets.list(voiceDir)
+                ?.filter { it.endsWith(".wav") }
+                ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     fun play(filename: String) {
         try {
             stop()
-            val afd = context.assets.openFd("$VOICE_DIR/$filename")
+            val afd: AssetFileDescriptor = context.assets.openFd("$voiceDir/$filename")
             player = MediaPlayer().apply {
                 setDataSource(afd)
                 setOnCompletionListener { release() }
@@ -31,7 +46,6 @@ class VoicePlayer(private val context: Context) {
                 prepare()
                 start()
             }
-            Log.d(TAG, "Playing: $filename")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to play $filename", e)
         }
