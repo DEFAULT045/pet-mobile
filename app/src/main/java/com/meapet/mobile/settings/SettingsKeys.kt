@@ -27,7 +27,11 @@ object SettingsKeys {
     const val ENABLE_DYNAMIC_COLOR = "enable_dynamic_color"
     const val COLOR_PRESET = "color_preset"  // "default" | "ocean" | "forest" | "sunset" | "rose" | "mono"
     const val FIRST_LAUNCH = "first_launch"
-
+/** Live2D 模型位置与缩放设置 */
+    const val CUSTOM_MODEL_PATH = "custom_model_path"
+    const val LIVE2D_SCALE = "live2d_scale"
+    const val LIVE2D_OFFSET_X = "live2d_offset_x"
+    const val LIVE2D_OFFSET_Y = "live2d_offset_y"
     /** 合理的默认值。 */
     object Defaults {
         const val API_URL = "https://api.openai.com/v1"
@@ -42,5 +46,10 @@ object SettingsKeys {
         const val THEME_MODE = "system"
         const val ENABLE_DYNAMIC_COLOR = true
         const val COLOR_PRESET = "default"
+        const val CUSTOM_MODEL_PATH = "" 
+        // 空表示使用内置默认模型
+        const val LIVE2D_SCALE = 1.0f
+        const val LIVE2D_OFFSET_X = 0.0f
+        const val LIVE2D_OFFSET_Y = 0.0f
     }
 }

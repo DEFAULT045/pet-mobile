@@ -10,7 +10,12 @@ import kotlinx.coroutines.flow.asSharedFlow
  * Singleton manager that owns the Live2D model and drives update/draw.
  */
 class Live2dManager private constructor() {
-
+    
+    // 控制模型缩放与偏移的变量
+    var modelScale: Float = 1.0f
+    var modelOffsetX: Float = 0.0f
+    var modelOffsetY: Float = 0.0f
+    
     companion object {
         private const val TAG = "Live2dManager"
 
@@ -87,13 +92,19 @@ class Live2dManager private constructor() {
 
         val canvasRatio = m.model!!.canvasHeight / m.model!!.canvasWidth
 
+        // 应用自定义缩放比例
+        val baseSize = 2.4f * modelScale
+
         if (canvasRatio < displayRatio) {
-            m.modelMatrix!!.setWidth(2.4f)
+            m.modelMatrix!!.setWidth(baseSize)
             projection.scale(1.0f, aspect)
         } else {
-            m.modelMatrix!!.setHeight(2.4f)
+            m.modelMatrix!!.setHeight(baseSize)
             projection.scale(1.0f / aspect, 1.0f)
         }
+
+        // 使用 setPosition 避免每一帧 translate 发生偏移累加
+        m.modelMatrix!!.setPosition(modelOffsetX, modelOffsetY)
 
         viewMatrix.multiplyByMatrix(projection)
 

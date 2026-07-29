@@ -1,22 +1,17 @@
 package com.meapet.mobile.ui.screen
 
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.compose.foundation.border
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,15 +38,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +54,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,19 +67,36 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.meapet.mobile.live2d.Live2dManager
+import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.ui.theme.THEME_PRESETS
 import com.meapet.mobile.viewmodel.SettingsViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.zip.ZipInputStream
 
 /**
  * 设置页面。
@@ -99,7 +111,68 @@ fun SettingsScreen(
     val state by settingsViewModel.state.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
 
-    // 深色与否跟随应用内主题设置（与页面整体配色取值一致），仅"跟随系统"时看系统
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settingsManager = remember { SettingsManager(context) }
+    val live2dManager = remember { Live2dManager.getInstance() }
+
+    // Live2D 相关的状态订阅
+    val customModelPath by settingsManager.customModelPathFlow.collectAsState(initial = settingsManager.getCustomModelPath())
+    val live2dScale by settingsManager.live2dScaleFlow.collectAsState(initial = settingsManager.getLive2dScale())
+    val live2dOffsetX by settingsManager.live2dOffsetXFlow.collectAsState(initial = settingsManager.getLive2dOffsetX())
+    val live2dOffsetY by settingsManager.live2dOffsetYFlow.collectAsState(initial = settingsManager.getLive2dOffsetY())
+
+    // 实时同步设置中的缩放与偏移量到 Live2dManager 单例
+    LaunchedEffect(live2dScale, live2dOffsetX, live2dOffsetY) {
+        live2dManager.modelScale = live2dScale
+        live2dManager.modelOffsetX = live2dOffsetX
+        live2dManager.modelOffsetY = live2dOffsetY
+    }
+
+    // 本地 ZIP 模型文件选择器
+    val zipPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { inputUri ->
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val targetDir = File(context.filesDir, "models/custom_model")
+                    if (targetDir.exists()) {
+                        targetDir.deleteRecursively()
+                    }
+                    targetDir.mkdirs()
+
+                    context.contentResolver.openInputStream(inputUri)?.use { inputStream ->
+                        ZipInputStream(inputStream).use { zip ->
+                            var entry = zip.nextEntry
+                            while (entry != null) {
+                                val file = File(targetDir, entry.name)
+                                if (entry.isDirectory) {
+                                    file.mkdirs()
+                                } else {
+                                    file.parentFile?.mkdirs()
+                                    file.outputStream().use { zip.copyTo(it) }
+                                }
+                                entry = zip.nextEntry
+                            }
+                        }
+                    }
+
+                    val jsonFile = targetDir.walk().firstOrNull { it.name.endsWith(".model3.json") }
+                    if (jsonFile != null) {
+                        settingsManager.setCustomModelPath(jsonFile.absolutePath)
+                        withContext(Dispatchers.Main) {
+                            live2dManager.resetModel()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("SettingsScreen", "导入模型失败", e)
+                }
+            }
+        }
+    }
+
+    // 深色与否跟随应用内主题设置
     val darkTheme = when (state.themeMode) {
         "dark" -> true
         "light" -> false
@@ -131,6 +204,9 @@ fun SettingsScreen(
             localModel = state.model
         }
     }
+
+    val inactiveTrackColor = if (darkTheme) Color(0xFF999999).copy(alpha = 0.3f)
+                              else Color.White.copy(alpha = 0.35f)
 
     Scaffold(
         topBar = {
@@ -232,7 +308,6 @@ fun SettingsScreen(
 
             OutlinedButton(
                 onClick = {
-                    // 先落盘当前编辑中的 Key/URL，再拉列表
                     settingsViewModel.saveApiKey(localApiKey)
                     settingsViewModel.saveApiUrl(localApiUrl)
                     settingsViewModel.fetchModels(localApiKey, localApiUrl)
@@ -330,8 +405,6 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            val inactiveTrackColor = if (darkTheme) Color(0xFF999999).copy(alpha = 0.3f)
-                                      else Color.White.copy(alpha = 0.35f)
             Slider(
                 value = localTemperature,
                 onValueChange = { localTemperature = it },
@@ -379,6 +452,106 @@ fun SettingsScreen(
                         if (!it.isFocused) settingsViewModel.saveSystemPrompt(localSystemPrompt)
                     },
                 maxLines = 6
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // ══════════════════════════════════════════
+            //  Live2D 模型与位置调整
+            // ══════════════════════════════════════════
+            SectionTitle("Live2D 模型与位置调整")
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { zipPickerLauncher.launch("application/zip") },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("导入本地模型(.zip)")
+                }
+
+                if (customModelPath.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                settingsManager.setCustomModelPath("")
+                                withContext(Dispatchers.Main) {
+                                    live2dManager.resetModel()
+                                }
+                            }
+                        }
+                    ) {
+                        Text("恢复默认模型")
+                    }
+                }
+            }
+
+            if (customModelPath.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "当前模型路径: $customModelPath",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── 缩放比例 Slider ──
+            Text(
+                text = "模型缩放大小: ${"%.2f".format(live2dScale)}x",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = live2dScale,
+                onValueChange = { scale ->
+                    live2dManager.modelScale = scale
+                    scope.launch { settingsManager.setLive2dScale(scale) }
+                },
+                valueRange = 0.5f..2.5f,
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(inactiveTrackColor = inactiveTrackColor)
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── 水平偏移 X 轴 Slider ──
+            Text(
+                text = "水平位置 (X 轴): ${"%.2f".format(live2dOffsetX)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = live2dOffsetX,
+                onValueChange = { x ->
+                    live2dManager.modelOffsetX = x
+                    scope.launch { settingsManager.setLive2dOffsetX(x) }
+                },
+                valueRange = -2.0f..2.0f,
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(inactiveTrackColor = inactiveTrackColor)
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── 垂直偏移 Y 轴 Slider ──
+            Text(
+                text = "垂直位置 (Y 轴): ${"%.2f".format(live2dOffsetY)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = live2dOffsetY,
+                onValueChange = { y ->
+                    live2dManager.modelOffsetY = y
+                    scope.launch { settingsManager.setLive2dOffsetY(y) }
+                },
+                valueRange = -2.0f..2.0f,
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(inactiveTrackColor = inactiveTrackColor)
             )
 
             Spacer(Modifier.height(16.dp))
@@ -470,7 +643,6 @@ fun SettingsScreen(
             // ══════════════════════════════════════════
             SectionTitle("隐私与数据")
 
-            val context = androidx.compose.ui.platform.LocalContext.current
             var umengAgreed by remember { mutableStateOf(
                 com.meapet.mobile.framework.PrivacyConsentManager.isAgreed(context)
             ) }
@@ -587,7 +759,6 @@ fun SettingsScreen(
 //  子组件
 // ═══════════════════════════════════════════════════
 
-
 @Composable
 private fun SectionTitle(title: String) {
     Text(
@@ -688,7 +859,6 @@ private fun ThemeModeSelector(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // 透明点击层——避免与 OutlinedTextField 的内部触摸处理冲突
         Box(
             modifier = Modifier
                 .matchParentSize()
@@ -762,7 +932,6 @@ private fun ColorPresetSelector(
                         .clickable { onSelect(preset.id) }
                         .width(56.dp)
                 ) {
-                    // 色块圆
                     val borderMod = if (isSelected) {
                         Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
                     } else {
