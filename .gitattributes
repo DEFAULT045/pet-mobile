@@ -1,0 +1,2 @@
+# 标记 Live2D 框架为 vendored（第三方代码），GitHub 会忽略其语言统计
+app/src/main/java/com/live2d/* linguist-vendored=true
