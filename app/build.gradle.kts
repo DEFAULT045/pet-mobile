@@ -76,6 +76,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.datastore.preferences)
 
+    // Liquid Glass (Backdrop) 毛玻璃特效库
+    implementation("io.github.kyant0:backdrop:0.2.0")
+
     // Live2D Cubism Core
     implementation(files("libs/Live2DCubismCore.aar"))
 
